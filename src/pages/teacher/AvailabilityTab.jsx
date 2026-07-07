@@ -8,6 +8,7 @@ export default function AvailabilityTab() {
   const { user } = useAuth();
   const [slots, setSlots] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
@@ -17,13 +18,15 @@ export default function AvailabilityTab() {
 
   const [start, setStart] = useState("14:00");
   const [end, setEnd] = useState("18:00");
+  const [branchId, setBranchId] = useState("");
+  const [memo, setMemo] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
     const { data: av } = await supabase
       .from("teacher_availability")
-      .select("*")
+      .select("*, branch:branch_id(name)")
       .eq("teacher_id", user.id)
       .not("date", "is", null)
       .order("date")
@@ -34,8 +37,14 @@ export default function AvailabilityTab() {
       .eq("teacher_id", user.id)
       .eq("type", "group")
       .eq("active", true);
+    // 지점 목록 (branches 테이블. 이름 다르면 여기 'branches'만 수정)
+    const { data: br } = await supabase
+      .from("branches")
+      .select("id, name")
+      .order("name");
     setSlots(av ?? []);
     setCourses(cs ?? []);
+    setBranches(br ?? []);
     setLoading(false);
   };
 
@@ -106,12 +115,15 @@ export default function AvailabilityTab() {
       weekday: new Date(selectedDate).getDay(),
       start_time: start,
       end_time: end,
+      branch_id: branchId || null,
+      memo: memo.trim() || null,
     });
     setSaving(false);
     if (error) {
       alert("저장 실패: " + error.message);
       return;
     }
+    setMemo("");
     load();
   };
 
@@ -198,6 +210,7 @@ export default function AvailabilityTab() {
                       className="truncate rounded bg-green-500/15 px-1 py-0.5 text-[9px] leading-tight text-green-700"
                     >
                       {s.start_time.slice(0, 5)}~{s.end_time.slice(0, 5)}
+                      {s.branch?.name ? ` ${s.branch.name}` : ""}
                     </div>
                   ))}
                   {/* 수업 (파랑) - 아래 */}
@@ -233,31 +246,61 @@ export default function AvailabilityTab() {
                 {month + 1}월 {Number(selectedDate.slice(-2))}일 (
                 {WEEKDAYS[new Date(selectedDate).getDay()]}) 가능시간
               </h4>
-              <div className="mb-3 flex items-end gap-2">
+
+              <div className="mb-3 space-y-2">
+                <div className="flex items-end gap-2">
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-500">시작</label>
+                    <input
+                      type="time"
+                      value={start}
+                      onChange={(e) => setStart(e.target.value)}
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-500">종료</label>
+                    <input
+                      type="time"
+                      value={end}
+                      onChange={(e) => setEnd(e.target.value)}
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue"
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="mb-1 block text-xs text-slate-500">시작</label>
+                  <label className="mb-1 block text-xs text-slate-500">지점</label>
+                  <select
+                    value={branchId}
+                    onChange={(e) => setBranchId(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue"
+                  >
+                    <option value="">지점 선택 안 함</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs text-slate-500">메모 (선택)</label>
                   <input
-                    type="time"
-                    value={start}
-                    onChange={(e) => setStart(e.target.value)}
-                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue"
+                    value={memo}
+                    onChange={(e) => setMemo(e.target.value)}
+                    placeholder="예: 오전만 가능 / 특강 대비"
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue"
                   />
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs text-slate-500">종료</label>
-                  <input
-                    type="time"
-                    value={end}
-                    onChange={(e) => setEnd(e.target.value)}
-                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue"
-                  />
-                </div>
+
                 <button
                   onClick={add}
                   disabled={saving}
-                  className="rounded-lg bg-seum-blue px-4 py-1.5 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60"
+                  className="w-full rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60"
                 >
-                  추가
+                  {saving ? "추가 중..." : "추가"}
                 </button>
               </div>
 
@@ -268,14 +311,24 @@ export default function AvailabilityTab() {
                   {selectedSlots.map((s) => (
                     <div
                       key={s.id}
-                      className="flex items-center justify-between rounded-lg bg-green-50 px-3 py-2"
+                      className="flex items-start justify-between rounded-lg bg-green-50 px-3 py-2"
                     >
-                      <span className="text-sm font-medium text-green-700">
-                        {s.start_time.slice(0, 5)} ~ {s.end_time.slice(0, 5)}
-                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-green-700">
+                          {s.start_time.slice(0, 5)} ~ {s.end_time.slice(0, 5)}
+                          {s.branch?.name ? (
+                            <span className="ml-1.5 rounded bg-green-100 px-1.5 py-0.5 text-[11px] text-green-800">
+                              {s.branch.name}
+                            </span>
+                          ) : null}
+                        </p>
+                        {s.memo ? (
+                          <p className="mt-0.5 text-xs text-slate-500">{s.memo}</p>
+                        ) : null}
+                      </div>
                       <button
                         onClick={() => remove(s.id)}
-                        className="text-xs text-slate-400 hover:text-red-500"
+                        className="ml-2 flex-shrink-0 text-xs text-slate-400 hover:text-red-500"
                       >
                         ✕
                       </button>
