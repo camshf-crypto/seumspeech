@@ -96,7 +96,7 @@ export default function AvailabilityTab() {
     // 내 수업 예약 (1:1 학생 + 단체반 둘 다)
     const { data: bk } = await supabase
       .from("lesson_bookings")
-      .select("*, student:student_id(name), course:course_id(title), branch:branch_id(name)")
+      .select("*, student:student_id(name), course:course_id(title), enrollment:enrollment_id(remaining_sessions, total_sessions), branch:branch_id(name)")
       .eq("teacher_id", user.id)
       .order("date")
       .order("start_time");
@@ -471,7 +471,8 @@ export default function AvailabilityTab() {
                           <p className="text-sm font-medium text-seum-blue">
                             {b.start_time?.slice(0, 5)} · {b.student?.name ?? b.course?.title ?? "수업"}
                             {b.course_id && !b.student_id ? <span className="ml-1 text-[11px] text-slate-400">(단체반)</span> : null}
-                            {b.branch?.name ? <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] text-seum-blue">{b.branch.name}</span> : null}
+                            {b.enrollment ? <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-bold text-seum-blue">{b.enrollment.remaining_sessions}/{b.enrollment.total_sessions}회</span> : null}
+                            {b.branch?.name ? <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">{b.branch.name}</span> : null}
                           </p>
                           {b.memo ? <p className="mt-0.5 text-xs text-slate-500">{b.memo}</p> : null}
                           <p className="mt-0.5 text-[11px] text-slate-400">클릭하여 수정</p>

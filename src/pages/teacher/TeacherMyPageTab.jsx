@@ -86,7 +86,7 @@ export default function TeacherMyPageTab({ teacherId }) {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto max-w-2xl space-y-5">
       {/* 담당 현황 요약 */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5 md:p-6">
         <h2 className="mb-4 font-bold text-seum-navy">담당 현황</h2>
