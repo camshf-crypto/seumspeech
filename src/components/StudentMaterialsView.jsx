@@ -19,7 +19,7 @@ const TYPE_FILTERS = [
 
 const fmt = (d) => (d ? new Date(d).toLocaleDateString("ko-KR") : "-");
 
-export default function StudentMaterialsView() {
+export default function StudentMaterialsView({ teacherId }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState("all");
@@ -33,26 +33,39 @@ export default function StudentMaterialsView() {
   const load = async () => {
     setLoading(true);
 
-    const { data: mats } = await supabase.from("student_materials").select("student_id");
-    const countMap = {};
-    (mats ?? []).forEach((m) => { countMap[m.student_id] = (countMap[m.student_id] || 0) + 1; });
-    const matStudentIds = new Set(Object.keys(countMap));
-
-    if (matStudentIds.size === 0) { setRows([]); setLoading(false); return; }
-
-    const { data: enr } = await supabase
+    // ✅ 담당(enrollments.teacher_id = 나) + 면접 과목인 수강만
+    let query = supabase
       .from("enrollments")
       .select("*, profiles:student_id(name, phone)")
       .in("course_id", INTERVIEW_IDS);
 
-    const filtered = (enr ?? [])
+    if (teacherId) query = query.eq("teacher_id", teacherId);
+
+    const { data: enr } = await query;
+    const enrList = enr ?? [];
+
+    if (enrList.length === 0) { setRows([]); setLoading(false); return; }
+
+    // 담당 학생들의 자료 개수만 집계
+    const studentIds = [...new Set(enrList.map((e) => e.student_id).filter(Boolean))];
+    const { data: mats } = await supabase
+      .from("student_materials")
+      .select("student_id")
+      .in("student_id", studentIds);
+
+    const countMap = {};
+    (mats ?? []).forEach((m) => { countMap[m.student_id] = (countMap[m.student_id] || 0) + 1; });
+    const matStudentIds = new Set(Object.keys(countMap));
+
+    // 자료를 실제로 올린 학생만 표시
+    const filtered = enrList
       .filter((e) => matStudentIds.has(e.student_id))
       .map((e) => ({ ...e, matCount: countMap[e.student_id] || 0 }));
     setRows(filtered);
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [teacherId]);
 
   const openStudent = async (row) => {
     setSelected(row);

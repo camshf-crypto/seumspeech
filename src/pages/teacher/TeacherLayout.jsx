@@ -81,7 +81,7 @@ export default function TeacherLayout() {
       case "interview":
         return <TeacherInterviewTab teacherId={profile.id} />;
       case "materials":
-        return <StudentMaterialsView />;
+        return <StudentMaterialsView teacherId={profile.id} />;
       case "chat":
         return <TeacherChatTab teacherId={profile.id} onRead={loadUnread} />;
       case "notifications":
