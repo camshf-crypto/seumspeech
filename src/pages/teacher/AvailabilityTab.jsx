@@ -27,11 +27,44 @@ export default function AvailabilityTab() {
   const [saving, setSaving] = useState(false);
 
   // 수업 예약 폼
+  const [lessonKind, setLessonKind] = useState("one"); // one | group
   const [lessonEnroll, setLessonEnroll] = useState("");
+  const [lessonCourse, setLessonCourse] = useState("");
   const [lessonTime, setLessonTime] = useState("14:00");
   const [lessonBranch, setLessonBranch] = useState("");
   const [lessonMemo, setLessonMemo] = useState("");
   const [lessonSaving, setLessonSaving] = useState(false);
+
+  // 예약 수정 팝업
+  const [editBooking, setEditBooking] = useState(null);
+  const [eTime, setETime] = useState("14:00");
+  const [eBranch, setEBranch] = useState("");
+  const [eMemo, setEMemo] = useState("");
+  const [eSaving, setESaving] = useState(false);
+
+  const openEdit = (b) => {
+    setEditBooking(b);
+    setETime(b.start_time?.slice(0, 5) ?? "14:00");
+    setEBranch(b.branch_id ?? "");
+    setEMemo(b.memo ?? "");
+  };
+
+  const saveEdit = async () => {
+    if (!editBooking) return;
+    setESaving(true);
+    const { error } = await supabase
+      .from("lesson_bookings")
+      .update({
+        start_time: eTime,
+        branch_id: eBranch || null,
+        memo: eMemo.trim() || null,
+      })
+      .eq("id", editBooking.id);
+    setESaving(false);
+    if (error) return alert("수정 실패: " + error.message);
+    setEditBooking(null);
+    load();
+  };
 
   const load = async () => {
     setLoading(true);
@@ -60,10 +93,10 @@ export default function AvailabilityTab() {
       .eq("teacher_id", user.id);
     const ones = (enr ?? []).filter((e) => e.courses?.type === "oneonone");
 
-    // 내 수업 예약
+    // 내 수업 예약 (1:1 학생 + 단체반 둘 다)
     const { data: bk } = await supabase
       .from("lesson_bookings")
-      .select("*, student:student_id(name), branch:branch_id(name)")
+      .select("*, student:student_id(name), course:course_id(title), branch:branch_id(name)")
       .eq("teacher_id", user.id)
       .order("date")
       .order("start_time");
@@ -162,26 +195,38 @@ export default function AvailabilityTab() {
 
   const addLesson = async () => {
     if (!selectedDate) return;
-    if (!lessonEnroll) return alert("학생을 선택하세요.");
-    const enr = oneStudents.find((e) => e.id === lessonEnroll);
-    if (!enr) return alert("학생 정보를 찾을 수 없습니다.");
 
-    setLessonSaving(true);
-    const { error } = await supabase.from("lesson_bookings").insert({
+    let payload = {
       teacher_id: user.id,
-      student_id: enr.student_id,
-      enrollment_id: enr.id,
       date: selectedDate,
       start_time: lessonTime,
       branch_id: lessonBranch || null,
       memo: lessonMemo.trim() || null,
-    });
+    };
+
+    if (lessonKind === "one") {
+      if (!lessonEnroll) return alert("학생을 선택하세요.");
+      const enr = oneStudents.find((e) => e.id === lessonEnroll);
+      if (!enr) return alert("학생 정보를 찾을 수 없습니다.");
+      payload.student_id = enr.student_id;
+      payload.enrollment_id = enr.id;
+      payload.course_id = null;
+    } else {
+      if (!lessonCourse) return alert("반을 선택하세요.");
+      payload.course_id = lessonCourse;
+      payload.student_id = null;
+      payload.enrollment_id = null;
+    }
+
+    setLessonSaving(true);
+    const { error } = await supabase.from("lesson_bookings").insert(payload);
     setLessonSaving(false);
     if (error) {
       alert("수업 예약 실패: " + error.message);
       return;
     }
     setLessonEnroll("");
+    setLessonCourse("");
     setLessonMemo("");
     load();
   };
@@ -261,16 +306,16 @@ export default function AvailabilityTab() {
                         {s.branch?.name ? ` ${s.branch.name}` : ""}
                       </div>
                     ))}
-                    {/* 단체반 수업 (파랑) */}
+                    {/* 단체반 정규수업 (파랑, 요일 고정) */}
                     {dayCourses.map((c) => (
                       <div key={c.id} className="truncate rounded bg-seum-blue/15 px-1 py-0.5 text-[9px] leading-tight text-seum-blue">
                         {c.start_time?.slice(0, 5)} {c.title}
                       </div>
                     ))}
-                    {/* 1:1 수업 예약 (파랑, 진하게) */}
+                    {/* 예약된 수업 (파랑, 진하게) - 1:1 학생 또는 단체반 */}
                     {dayBookings.map((b) => (
                       <div key={b.id} className="truncate rounded bg-seum-blue/25 px-1 py-0.5 text-[9px] font-medium leading-tight text-seum-blue">
-                        {b.start_time?.slice(0, 5)} {b.student?.name}
+                        {b.start_time?.slice(0, 5)} {b.student?.name ?? b.course?.title ?? "수업"}
                       </div>
                     ))}
                   </div>
@@ -350,19 +395,51 @@ export default function AvailabilityTab() {
                   {month + 1}월 {Number(selectedDate.slice(-2))}일 ({WEEKDAYS[new Date(selectedDate).getDay()]}) 수업 잡기
                 </h4>
 
+                {/* 1:1 / 단체반 선택 */}
+                <div className="mb-3 flex gap-2">
+                  <button
+                    onClick={() => setLessonKind("one")}
+                    className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${lessonKind === "one" ? "border-seum-blue bg-blue-50 text-seum-blue" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}
+                  >
+                    1:1
+                  </button>
+                  <button
+                    onClick={() => setLessonKind("group")}
+                    className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${lessonKind === "group" ? "border-seum-blue bg-blue-50 text-seum-blue" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}
+                  >
+                    단체반
+                  </button>
+                </div>
+
                 <div className="mb-3 space-y-2">
-                  <div>
-                    <label className="mb-1 block text-xs text-slate-500">학생 (1:1 담당)</label>
-                    <select value={lessonEnroll} onChange={(e) => setLessonEnroll(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue">
-                      <option value="">학생 선택...</option>
-                      {oneStudents.map((e) => (
-                        <option key={e.id} value={e.id}>
-                          {e.student?.name} · {e.courses?.title?.replace("1:1 ", "")} (잔여 {e.remaining_sessions}/{e.total_sessions})
-                        </option>
-                      ))}
-                    </select>
-                    {oneStudents.length === 0 ? <p className="mt-1 text-xs text-amber-600">담당으로 배정된 1:1 학생이 없습니다.</p> : null}
-                  </div>
+                  {lessonKind === "one" ? (
+                    <div>
+                      <label className="mb-1 block text-xs text-slate-500">학생 (1:1 담당)</label>
+                      <select value={lessonEnroll} onChange={(e) => setLessonEnroll(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue">
+                        <option value="">학생 선택...</option>
+                        {oneStudents.map((e) => (
+                          <option key={e.id} value={e.id}>
+                            {e.student?.name} · {e.courses?.title?.replace("1:1 ", "")} (잔여 {e.remaining_sessions}/{e.total_sessions})
+                          </option>
+                        ))}
+                      </select>
+                      {oneStudents.length === 0 ? <p className="mt-1 text-xs text-amber-600">담당으로 배정된 1:1 학생이 없습니다.</p> : null}
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="mb-1 block text-xs text-slate-500">반 (담당 단체반)</label>
+                      <select value={lessonCourse} onChange={(e) => setLessonCourse(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue">
+                        <option value="">반 선택...</option>
+                        {courses.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.title} · 매주 {WEEKDAYS[c.weekday] ?? "-"} {c.start_time?.slice(0, 5) ?? ""}
+                          </option>
+                        ))}
+                      </select>
+                      {courses.length === 0 ? <p className="mt-1 text-xs text-amber-600">담당으로 지정된 단체반이 없습니다.</p> : null}
+                    </div>
+                  )}
+
                   <div>
                     <label className="mb-1 block text-xs text-slate-500">수업 시작 시간</label>
                     <input type="time" value={lessonTime} onChange={(e) => setLessonTime(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
@@ -390,13 +467,15 @@ export default function AvailabilityTab() {
                   <div className="space-y-2">
                     {selectedBookings.map((b) => (
                       <div key={b.id} className="flex items-start justify-between rounded-lg bg-blue-50 px-3 py-2">
-                        <div className="min-w-0">
+                        <button onClick={() => openEdit(b)} className="min-w-0 flex-1 text-left">
                           <p className="text-sm font-medium text-seum-blue">
-                            {b.start_time?.slice(0, 5)} · {b.student?.name}
+                            {b.start_time?.slice(0, 5)} · {b.student?.name ?? b.course?.title ?? "수업"}
+                            {b.course_id && !b.student_id ? <span className="ml-1 text-[11px] text-slate-400">(단체반)</span> : null}
                             {b.branch?.name ? <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] text-seum-blue">{b.branch.name}</span> : null}
                           </p>
                           {b.memo ? <p className="mt-0.5 text-xs text-slate-500">{b.memo}</p> : null}
-                        </div>
+                          <p className="mt-0.5 text-[11px] text-slate-400">클릭하여 수정</p>
+                        </button>
                         <button onClick={() => removeLesson(b.id)} className="ml-2 flex-shrink-0 text-xs text-slate-400 hover:text-red-500">✕</button>
                       </div>
                     ))}
@@ -404,10 +483,10 @@ export default function AvailabilityTab() {
                 )}
               </div>
 
-              {/* 단체반 수업 (참고 표시) */}
+              {/* 단체반 정규수업 (요일 고정, 참고 표시) */}
               {selectedCourses.length > 0 && (
                 <div className="rounded-xl border border-slate-200 bg-white p-5">
-                  <h4 className="mb-2 font-bold text-seum-navy">단체반 수업</h4>
+                  <h4 className="mb-2 font-bold text-seum-navy">이 요일 정규 단체반</h4>
                   <div className="space-y-1.5">
                     {selectedCourses.map((c) => (
                       <div key={c.id} className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-seum-blue">
@@ -421,6 +500,53 @@ export default function AvailabilityTab() {
           )}
         </div>
       </div>
+
+      {/* 예약 수정 팝업 */}
+      {editBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditBooking(null)}>
+          <div className="w-full max-w-sm space-y-4 rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-seum-navy">수업 수정</h3>
+              <button onClick={() => setEditBooking(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+
+            <div className="rounded-lg bg-slate-50 p-3 text-sm">
+              <p className="font-medium text-seum-navy">
+                {editBooking.student?.name ?? editBooking.course?.title ?? "수업"}
+              </p>
+              <p className="text-xs text-slate-400">{editBooking.date}</p>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs text-slate-500">수업 시작 시간</label>
+              <input type="time" value={eTime} onChange={(e) => setETime(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-slate-500">지점</label>
+              <select value={eBranch} onChange={(e) => setEBranch(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue">
+                <option value="">지점 선택 안 함</option>
+                {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-slate-500">메모 (선택)</label>
+              <input value={eMemo} onChange={(e) => setEMemo(e.target.value)} placeholder="예: 모의면접 2회차" className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+            </div>
+
+            <div className="flex gap-2">
+              <button onClick={saveEdit} disabled={eSaving} className="flex-1 rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60">
+                {eSaving ? "저장 중..." : "수정 저장"}
+              </button>
+              <button
+                onClick={() => { removeLesson(editBooking.id); setEditBooking(null); }}
+                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-50"
+              >
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
