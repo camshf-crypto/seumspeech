@@ -36,6 +36,13 @@ export default function AttendanceTab() {
   const [loading, setLoading] = useState(false);
   const [scheduleId, setScheduleId] = useState(null);
 
+  // 1:1 수업 예약
+  const [oneBookings, setOneBookings] = useState([]);
+  const [selectedBooking, setSelectedBooking] = useState(null);
+  const [oneStatus, setOneStatus] = useState("present");
+  const [oneRemain, setOneRemain] = useState(null);
+  const [oneTotal, setOneTotal] = useState(null);
+
   const [historyStudent, setHistoryStudent] = useState(null);
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -88,7 +95,19 @@ export default function AttendanceTab() {
     }
     setEnrollCount(counts);
     setDoneCourses(done);
+
+    // 이 날 내 1:1 수업 예약 (student_id 있는 것 = 1:1)
+    const { data: bk } = await supabase
+      .from("lesson_bookings")
+      .select("*, student:student_id(name), enrollment:enrollment_id(remaining_sessions, total_sessions, courses(title)), branch:branch_id(name)")
+      .eq("teacher_id", user.id)
+      .eq("date", date)
+      .not("student_id", "is", null)
+      .order("start_time");
+    setOneBookings(bk ?? []);
+
     setSelectedCourse(null);
+    setSelectedBooking(null);
     setStudents([]);
   };
 
@@ -98,6 +117,7 @@ export default function AttendanceTab() {
 
   const openCourse = async (course) => {
     setSelectedCourse(course);
+    setSelectedBooking(null);
     setLoading(true);
 
     const { data: enr } = await supabase
@@ -141,6 +161,14 @@ export default function AttendanceTab() {
     setStudents(studentList);
     setAttendance(initial);
     setLoading(false);
+  };
+
+  const openBooking = (b) => {
+    setSelectedBooking(b);
+    setSelectedCourse(null);
+    setOneStatus(b.attended ?? "present");
+    setOneRemain(b.enrollment?.remaining_sessions ?? null);
+    setOneTotal(b.enrollment?.total_sessions ?? null);
   };
 
   const setStatus = (studentId, status) => {
@@ -199,6 +227,50 @@ export default function AttendanceTab() {
     setSelectedCourse(null);
   };
 
+  // 1:1 출석 저장 (횟수 차감 포함)
+  const saveBooking = async () => {
+    if (!selectedBooking) return;
+    setLoading(true);
+
+    const b = selectedBooking;
+    const prev = b.attended; // 이전 처리 상태 (null이면 첫 처리)
+    const enrId = b.enrollment_id;
+
+    // 차감 계산: 출석/결석 = 1 차감, 보류 = 차감 안 함
+    const countsAsUsed = (st) => st === "present" || st === "absent";
+    const wasUsed = prev ? countsAsUsed(prev) : false;
+    const nowUsed = countsAsUsed(oneStatus);
+
+    // 잔여 횟수 조정 (이전 대비 변화만 반영)
+    if (enrId && wasUsed !== nowUsed) {
+      const { data: enr } = await supabase
+        .from("enrollments")
+        .select("remaining_sessions")
+        .eq("id", enrId)
+        .single();
+      if (enr) {
+        let newRemain = enr.remaining_sessions;
+        if (!wasUsed && nowUsed) newRemain = Math.max(0, newRemain - 1); // 새로 차감
+        if (wasUsed && !nowUsed) newRemain = newRemain + 1; // 되돌림
+        await supabase
+          .from("enrollments")
+          .update({ remaining_sessions: newRemain })
+          .eq("id", enrId);
+      }
+    }
+
+    // 예약에 출석 상태 기록
+    await supabase
+      .from("lesson_bookings")
+      .update({ attended: oneStatus })
+      .eq("id", b.id);
+
+    setLoading(false);
+    alert("출석이 저장되었습니다.");
+    await loadCourses();
+    setSelectedBooking(null);
+  };
+
   const openHistory = async (student) => {
     setHistoryStudent(student);
     setHistoryLoading(true);
@@ -245,31 +317,75 @@ export default function AttendanceTab() {
         </div>
       </div>
 
-      {/* 내 반 목록 */}
-      {!selectedCourse && (
-        <div>
-          <h4 className="mb-3 text-sm font-bold text-slate-600">
-            {date === todayStr() ? "오늘 담당 수업" : "이 날 담당 수업"}
-          </h4>
-          {courses.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-400">
-              이 날 담당 수업이 없습니다.
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {courses.map((c) => {
-                const wn = weekNo(c.start_date);
-                return (
+      {/* 목록 (단체반 + 1:1) */}
+      {!selectedCourse && !selectedBooking && (
+        <div className="space-y-5">
+          {/* 단체반 */}
+          <div>
+            <h4 className="mb-3 text-sm font-bold text-slate-600">
+              {date === todayStr() ? "오늘 담당 단체반" : "이 날 담당 단체반"}
+            </h4>
+            {courses.length === 0 ? (
+              <p className="py-4 text-center text-sm text-slate-400">
+                이 날 담당 단체반이 없습니다.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {courses.map((c) => {
+                  const wn = weekNo(c.start_date);
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => openCourse(c)}
+                      className="rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-seum-blue hover:bg-blue-50"
+                    >
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="font-bold text-seum-navy">{c.title}</span>
+                        {doneCourses[c.id] ? (
+                          <span className="rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-600">
+                            수업완료
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-600">
+                            수업예정
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-slate-500">
+                        {c.start_time?.slice(0, 5)} · 수강생 {enrollCount[c.id] ?? 0}명
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {c.start_date
+                          ? `개강 ${c.start_date} · ${wn ? wn + "주차" : "개강 전"}`
+                          : "개강일 미설정"}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 1:1 수업 예약 */}
+          <div>
+            <h4 className="mb-3 text-sm font-bold text-slate-600">이 날 1:1 수업</h4>
+            {oneBookings.length === 0 ? (
+              <p className="py-4 text-center text-sm text-slate-400">
+                이 날 1:1 수업이 없습니다.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {oneBookings.map((b) => (
                   <button
-                    key={c.id}
-                    onClick={() => openCourse(c)}
+                    key={b.id}
+                    onClick={() => openBooking(b)}
                     className="rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-seum-blue hover:bg-blue-50"
                   >
                     <div className="mb-1 flex items-center justify-between">
-                      <span className="font-bold text-seum-navy">{c.title}</span>
-                      {doneCourses[c.id] ? (
+                      <span className="font-bold text-seum-navy">{b.student?.name ?? "학생"}</span>
+                      {b.attended ? (
                         <span className="rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-600">
-                          수업완료
+                          {STATUS_LABEL[b.attended]?.label ?? "완료"}
                         </span>
                       ) : (
                         <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-600">
@@ -278,22 +394,21 @@ export default function AttendanceTab() {
                       )}
                     </div>
                     <p className="text-sm text-slate-500">
-                      {c.start_time?.slice(0, 5)} · 수강생 {enrollCount[c.id] ?? 0}명
+                      {b.start_time?.slice(0, 5)} · {(b.enrollment?.courses?.title ?? "").replace("1:1 ", "")}
                     </p>
                     <p className="mt-1 text-xs text-slate-400">
-                      {c.start_date
-                        ? `개강 ${c.start_date} · ${wn ? wn + "주차" : "개강 전"}`
-                        : "개강일 미설정"}
+                      {b.branch?.name ? `${b.branch.name} · ` : ""}
+                      잔여 {b.enrollment?.remaining_sessions ?? "-"}/{b.enrollment?.total_sessions ?? "-"}회
                     </p>
                   </button>
-                );
-              })}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* 선택한 반 출석 */}
+      {/* 선택한 단체반 출석 */}
       {selectedCourse && (
         <div className="rounded-xl border border-slate-200 bg-white p-5">
           <div className="mb-1 flex items-center justify-between">
@@ -304,7 +419,7 @@ export default function AttendanceTab() {
               onClick={() => setSelectedCourse(null)}
               className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50"
             >
-              ← 반 목록
+              ← 목록
             </button>
           </div>
           <p className="mb-4 text-xs text-slate-400">
@@ -373,6 +488,56 @@ export default function AttendanceTab() {
               </p>
             </>
           )}
+        </div>
+      )}
+
+      {/* 선택한 1:1 출석 */}
+      {selectedBooking && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h4 className="font-bold text-seum-navy">
+              {selectedBooking.student?.name} 1:1 출석
+            </h4>
+            <button
+              onClick={() => setSelectedBooking(null)}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50"
+            >
+              ← 목록
+            </button>
+          </div>
+          <p className="mb-4 text-xs text-slate-400">
+            {(selectedBooking.enrollment?.courses?.title ?? "").replace("1:1 ", "")}
+            {selectedBooking.branch?.name ? ` · ${selectedBooking.branch.name}` : ""}
+            {" · "}{selectedBooking.start_time?.slice(0, 5)}
+            {" · "}잔여 {oneRemain ?? "-"}/{oneTotal ?? "-"}회
+          </p>
+
+          <div className="flex gap-1.5">
+            {OPTIONS.map((opt) => (
+              <button
+                key={opt.v}
+                onClick={() => setOneStatus(opt.v)}
+                className={`rounded-lg px-4 py-2 text-sm font-bold transition ${
+                  oneStatus === opt.v ? `${opt.c} text-white` : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={saveBooking}
+              disabled={loading}
+              className="rounded-lg bg-seum-blue px-8 py-2.5 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60"
+            >
+              출석 저장
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            ※ 출석·결석은 1회 차감, 보류는 차감되지 않습니다. (다시 저장하면 자동 조정)
+          </p>
         </div>
       )}
 
