@@ -9,6 +9,7 @@ import TeacherNotificationsTab from "./TeacherNotificationsTab";
 import TeacherSettlementTab from "./TeacherSettlementTab";
 import StudentMaterialsView from "../../components/StudentMaterialsView";
 import TeacherInterviewTab from "./TeacherInterviewTab";
+import TeacherMyPageTab from "./TeacherMyPageTab";
 
 export default function TeacherLayout() {
   const { profile, signOut } = useAuth();
@@ -64,6 +65,7 @@ export default function TeacherLayout() {
     { key: "chat", label: "학생 채팅" },
     { key: "notifications", label: "알림" },
     { key: "settlement", label: "수업 정산" },
+    { key: "mypage", label: "마이페이지" },
   ];
 
   const current = MENUS.find((m) => m.key === active);
@@ -92,6 +94,8 @@ export default function TeacherLayout() {
         );
       case "settlement":
         return <TeacherSettlementTab teacherId={profile.id} />;
+      case "mypage":
+        return <TeacherMyPageTab teacherId={profile.id} />;
       default:
         return (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-8">
