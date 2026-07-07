@@ -14,6 +14,7 @@ export default function AdminScheduleTab({ branchId }) {
   const [teachers, setTeachers] = useState([]);
   const [branches, setBranches] = useState([]);
   const [consults, setConsults] = useState([]);
+  const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pickTeacher, setPickTeacher] = useState("all");
   const [cursor, setCursor] = useState(() => {
@@ -25,7 +26,7 @@ export default function AdminScheduleTab({ branchId }) {
     setLoading(true);
     const { data: av } = await supabase
       .from("teacher_availability")
-      .select("*, teacher:teacher_id(name)")
+      .select("*, teacher:teacher_id(name), branch:branch_id(name)")
       .not("date", "is", null);
     const { data: cs } = await supabase
       .from("courses")
@@ -41,11 +42,15 @@ export default function AdminScheduleTab({ branchId }) {
       .from("consultations")
       .select("*")
       .not("scheduled_at", "is", null);
+    const { data: bk } = await supabase
+      .from("lesson_bookings")
+      .select("*, teacher:teacher_id(name), student:student_id(name), branch:branch_id(name)");
     setSlots(av ?? []);
     setCourses(cs ?? []);
     setTeachers(tc ?? []);
     setBranches(br ?? []);
     setConsults(co ?? []);
+    setBookings(bk ?? []);
     setLoading(false);
   };
 
@@ -68,6 +73,8 @@ export default function AdminScheduleTab({ branchId }) {
       (c) => c.weekday === wd && c.branch_id === branchId && filterTeacher(c.teacher_id)
     );
   };
+  const bookingsOnDate = (ds) =>
+    bookings.filter((b) => b.date === ds && filterTeacher(b.teacher_id));
   // 상담은 선생님 필터 영향 안 받음 (원장 전체 일정)
   const consultsOnDate = (ds) =>
     consults.filter((c) => {
@@ -147,6 +154,7 @@ export default function AdminScheduleTab({ branchId }) {
           const daySlots = slotsOnDate(ds);
           const dayCourses = coursesOnDate(ds);
           const dayConsults = consultsOnDate(ds);
+          const dayBookings = bookingsOnDate(ds);
           return (
             <div key={d} className="min-h-[110px] rounded-lg border border-slate-200 bg-white p-1.5 align-top">
               <span className={`text-xs font-bold ${wd === 0 ? "text-red-400" : wd === 6 ? "text-blue-400" : "text-slate-600"}`}>{d}</span>
@@ -160,6 +168,12 @@ export default function AdminScheduleTab({ branchId }) {
                 {dayCourses.map((c) => (
                   <div key={c.id} className="truncate rounded bg-seum-blue/15 px-1 py-0.5 text-[9px] leading-tight text-seum-blue">
                     [{branchName(c.branch_id)}] {c.start_time?.slice(0, 5)} {c.title}
+                  </div>
+                ))}
+                {dayBookings.map((b) => (
+                  <div key={b.id} className="truncate rounded bg-seum-blue/25 px-1 py-0.5 text-[9px] font-medium leading-tight text-seum-blue">
+                    {b.start_time?.slice(0, 5)} {b.student?.name}
+                    {pickTeacher === "all" && b.teacher?.name ? ` (${b.teacher.name})` : ""}
                   </div>
                 ))}
                 {dayConsults.map((c) => (
