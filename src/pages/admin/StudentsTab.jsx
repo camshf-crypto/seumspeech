@@ -17,6 +17,12 @@ const STATUS_TABS = [
   { key: "done", label: "완료" },
 ];
 
+const bkDateFmt = (ds) => {
+  if (!ds) return "-";
+  const d = new Date(ds);
+  return `${d.getMonth() + 1}.${d.getDate()}`;
+};
+
 export default function StudentsTab({ branchId }) {
   const [students, setStudents] = useState([]);
   const [enrollMap, setEnrollMap] = useState({});
@@ -44,12 +50,20 @@ export default function StudentsTab({ branchId }) {
   const [careerLevel, setCareerLevel] = useState("");
   const [assigning, setAssigning] = useState(false);
 
+  // 1:1 등록 시 첫 수업
+  const [firstDate, setFirstDate] = useState("");
+  const [firstTime, setFirstTime] = useState("14:00");
+
   const [jobCompany, setJobCompany] = useState("");
   const [jobPosition, setJobPosition] = useState("");
   const [jobStatus, setJobStatus] = useState("");
 
   const [enrollEdits, setEnrollEdits] = useState({});
   const [showAddEnroll, setShowAddEnroll] = useState(false);
+
+  // 수강별 예약(첫 수업) 목록 + 추가 폼 상태
+  const [bookingsMap, setBookingsMap] = useState({}); // enrollment_id -> [bookings]
+  const [bookForm, setBookForm] = useState({}); // enrollment_id -> {date, time}
 
   const [qTarget, setQTarget] = useState(null);
   const [qTitle, setQTitle] = useState("");
@@ -82,6 +96,22 @@ export default function StudentsTab({ branchId }) {
   };
 
   useEffect(() => { loadBase(); }, []);
+
+  // 선택 학생의 수업 예약 불러오기
+  const loadBookings = async (sid) => {
+    const { data: bk } = await supabase
+      .from("lesson_bookings")
+      .select("*")
+      .eq("student_id", sid)
+      .order("date")
+      .order("start_time");
+    const map = {};
+    (bk ?? []).forEach((b) => {
+      const key = b.enrollment_id ?? "none";
+      (map[key] = map[key] || []).push(b);
+    });
+    setBookingsMap(map);
+  };
 
   const studentStatus = (sid) => {
     const list = enrollMap[sid] ?? [];
@@ -127,6 +157,7 @@ export default function StudentsTab({ branchId }) {
     setEnrollTab("group");
     setPickCourse(""); setOneType(""); setOneTeacher("");
     setExamType(""); setCompany(""); setJobRole(""); setCareerLevel("");
+    setFirstDate(""); setFirstTime("14:00");
     setJobCompany(student.job_company ?? "");
     setJobPosition(student.job_position ?? "");
     setJobStatus(student.job_status ?? "");
@@ -144,8 +175,10 @@ export default function StudentsTab({ branchId }) {
       };
     });
     setEnrollEdits(edits);
+    setBookForm({});
     setShowAddEnroll(false);
     loadMemo(student.id);
+    loadBookings(student.id);
   };
 
   const loadMemo = async (sid) => {
@@ -230,6 +263,7 @@ export default function StudentsTab({ branchId }) {
     });
     setEnrollEdits(edits);
     if (fresh) setSelected(fresh);
+    await loadBookings(selected.id);
   };
 
   const assignGroup = async () => {
@@ -255,18 +289,32 @@ export default function StudentsTab({ branchId }) {
     if (!oneType) return alert("1:1 종류를 선택하세요.");
     if (!oneTeacher) return alert("담임 선생님을 선택하세요.");
     setAssigning(true);
-    const { error } = await supabase.from("enrollments").insert({
+    const { data: newEnr, error } = await supabase.from("enrollments").insert({
       student_id: selected.id, course_id: oneType, teacher_id: oneTeacher,
       total_sessions: oneSessions, remaining_sessions: oneSessions, status: "active",
       exam_type: isGongmuwon ? examType : null,
       company: isInterview && !isGongmuwon ? company : null,
       job_role: isInterview ? jobRole : null,
       career_level: isInterview ? careerLevel : null,
-    });
+    }).select().single();
+
+    if (error) { setAssigning(false); return alert("1:1 등록 실패: " + error.message); }
+
+    // 첫 수업 날짜가 있으면 lesson_bookings에 예약 생성
+    if (firstDate && newEnr) {
+      const { error: bkErr } = await supabase.from("lesson_bookings").insert({
+        teacher_id: oneTeacher,
+        student_id: selected.id,
+        enrollment_id: newEnr.id,
+        date: firstDate,
+        start_time: firstTime,
+      });
+      if (bkErr) { setAssigning(false); return alert("첫 수업 예약 실패: " + bkErr.message); }
+    }
+
     setAssigning(false);
-    if (error) return alert("1:1 등록 실패: " + error.message);
     setOneType(""); setOneTeacher(""); setExamType(""); setCompany("");
-    setJobRole(""); setCareerLevel("");
+    setJobRole(""); setCareerLevel(""); setFirstDate(""); setFirstTime("14:00");
     setShowAddEnroll(false);
     await refreshKeepOpen();
   };
@@ -276,6 +324,29 @@ export default function StudentsTab({ branchId }) {
     const { error } = await supabase.from("enrollments").delete().eq("id", enrollId);
     if (error) return alert("삭제 실패: " + error.message);
     await refreshKeepOpen();
+  };
+
+  // 기존 수강에 수업 예약 추가
+  const addBookingToEnroll = async (enroll) => {
+    const form = bookForm[enroll.id] ?? {};
+    if (!form.date) return alert("날짜를 선택하세요.");
+    if (!enroll.teacher_id) return alert("담임 선생님을 먼저 지정하고 저장하세요.");
+    const { error } = await supabase.from("lesson_bookings").insert({
+      teacher_id: enroll.teacher_id,
+      student_id: selected.id,
+      enrollment_id: enroll.id,
+      date: form.date,
+      start_time: form.time || "14:00",
+    });
+    if (error) return alert("수업 예약 실패: " + error.message);
+    setBookForm((p) => ({ ...p, [enroll.id]: { date: "", time: "14:00" } }));
+    await loadBookings(selected.id);
+  };
+
+  const removeBooking = async (id) => {
+    if (!window.confirm("이 수업 예약을 삭제할까요?")) return;
+    await supabase.from("lesson_bookings").delete().eq("id", id);
+    await loadBookings(selected.id);
   };
 
   const openQuestionGen = (student) => {
@@ -518,13 +589,16 @@ export default function StudentsTab({ branchId }) {
                     const title = e.courses?.title ?? "";
                     const isItv = INTERVIEW_TITLES.includes(title);
                     const isGm = title === GONGMUWON;
+                    const isOne = e.courses?.type === "oneonone";
                     const ed = enrollEdits[e.id] ?? {};
+                    const enrBookings = bookingsMap[e.id] ?? [];
+                    const bf = bookForm[e.id] ?? { date: "", time: "14:00" };
                     return (
                       <div key={e.id} className="rounded-lg bg-slate-50 px-4 py-3">
                         <div className="mb-2 flex items-center justify-between">
                           <span className="text-sm font-medium text-slate-700">
                             {e.courses?.title}
-                            <span className="ml-2 text-xs text-slate-400">{e.courses?.type === "oneonone" ? "1:1" : "단체반"}</span>
+                            <span className="ml-2 text-xs text-slate-400">{isOne ? "1:1" : "단체반"}</span>
                           </span>
                           <button type="button" onClick={() => deleteEnroll(e.id)} className="rounded px-1.5 text-sm text-red-400 hover:bg-red-50 hover:text-red-600" title="수강 삭제">✕</button>
                         </div>
@@ -537,7 +611,7 @@ export default function StudentsTab({ branchId }) {
                           <span className="text-sm text-slate-500">회</span>
                         </div>
 
-                        {e.courses?.type === "oneonone" && (
+                        {isOne && (
                           <div className="mt-2 flex items-center gap-2">
                             <span className="w-14 text-xs text-slate-500">담임</span>
                             <select value={ed.teacher ?? ""} onChange={(ev) => setEdit(e.id, "teacher", ev.target.value)} className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue">
@@ -569,6 +643,31 @@ export default function StudentsTab({ branchId }) {
                             {CAREER_LEVELS.map((lv) => (
                               <button type="button" key={lv} onClick={() => setEdit(e.id, "career", lv)} className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${ed.career === lv ? "border-seum-blue bg-blue-50 text-seum-blue" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}>{lv}</button>
                             ))}
+                          </div>
+                        )}
+
+                        {/* 1:1 수업 예약 (첫 수업 등) */}
+                        {isOne && (
+                          <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+                            <p className="mb-1.5 text-xs font-bold text-seum-navy">수업 일정</p>
+                            {enrBookings.length === 0 ? (
+                              <p className="mb-2 text-xs text-slate-400">잡힌 수업이 없습니다.</p>
+                            ) : (
+                              <div className="mb-2 space-y-1">
+                                {enrBookings.map((b) => (
+                                  <div key={b.id} className="flex items-center justify-between rounded bg-blue-50 px-2 py-1 text-xs text-seum-blue">
+                                    <span>{bkDateFmt(b.date)} {b.start_time?.slice(0, 5)}</span>
+                                    <button type="button" onClick={() => removeBooking(b.id)} className="text-slate-400 hover:text-red-500">✕</button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1.5">
+                              <input type="date" value={bf.date} onChange={(ev) => setBookForm((p) => ({ ...p, [e.id]: { ...bf, date: ev.target.value } }))} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-seum-blue" />
+                              <input type="time" value={bf.time} onChange={(ev) => setBookForm((p) => ({ ...p, [e.id]: { ...bf, time: ev.target.value } }))} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-seum-blue" />
+                              <button type="button" onClick={() => addBookingToEnroll(e)} className="rounded-lg bg-seum-blue px-3 py-1 text-xs font-bold text-white hover:bg-[#2a63c4]">수업 잡기</button>
+                            </div>
+                            <p className="mt-1 text-[11px] text-slate-400">※ 담임 지정 후 저장해야 예약할 수 있습니다.</p>
                           </div>
                         )}
                       </div>
@@ -646,6 +745,17 @@ export default function StudentsTab({ branchId }) {
                           <span className="text-sm text-slate-500">회</span>
                         </div>
                       </div>
+
+                      {/* 첫 수업 날짜·시간 (선택) */}
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="mb-1.5 text-xs font-medium text-slate-500">첫 수업 일정 (선택)</p>
+                        <div className="flex items-center gap-1.5">
+                          <input type="date" value={firstDate} onChange={(e) => setFirstDate(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+                          <input type="time" value={firstTime} onChange={(e) => setFirstTime(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-400">비워두면 선생님이 나중에 잡습니다.</p>
+                      </div>
+
                       <button type="button" onClick={assignOne} disabled={assigning} className="w-full rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60">1:1 등록</button>
                     </div>
                   )}
