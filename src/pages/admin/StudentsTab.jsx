@@ -308,6 +308,7 @@ export default function StudentsTab({ branchId }) {
         enrollment_id: newEnr.id,
         date: firstDate,
         start_time: firstTime,
+        branch_id: branchId || null,
       });
       if (bkErr) { setAssigning(false); return alert("첫 수업 예약 실패: " + bkErr.message); }
     }
@@ -337,6 +338,7 @@ export default function StudentsTab({ branchId }) {
       enrollment_id: enroll.id,
       date: form.date,
       start_time: form.time || "14:00",
+      branch_id: branchId || null,
     });
     if (error) return alert("수업 예약 실패: " + error.message);
     setBookForm((p) => ({ ...p, [enroll.id]: { date: "", time: "14:00" } }));

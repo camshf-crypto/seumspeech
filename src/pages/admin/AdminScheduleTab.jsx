@@ -44,7 +44,7 @@ export default function AdminScheduleTab({ branchId }) {
       .not("scheduled_at", "is", null);
     const { data: bk } = await supabase
       .from("lesson_bookings")
-      .select("*, teacher:teacher_id(name), student:student_id(name), branch:branch_id(name)");
+      .select("*, teacher:teacher_id(name), student:student_id(name), course:course_id(title), enrollment:enrollment_id(remaining_sessions, total_sessions, courses(title)), branch:branch_id(name)");
     setSlots(av ?? []);
     setCourses(cs ?? []);
     setTeachers(tc ?? []);
@@ -66,15 +66,16 @@ export default function AdminScheduleTab({ branchId }) {
   const filterTeacher = (tid) => pickTeacher === "all" || tid === pickTeacher;
 
   const slotsOnDate = (ds) =>
-    slots.filter((s) => s.date === ds && filterTeacher(s.teacher_id));
+    slots.filter((s) => s.date === ds && filterTeacher(s.teacher_id) && (!s.branch_id || s.branch_id === branchId));
   const coursesOnDate = (ds) => {
     const wd = new Date(ds).getDay();
     return courses.filter(
       (c) => c.weekday === wd && c.branch_id === branchId && filterTeacher(c.teacher_id)
     );
   };
+  // 예약: 선생님 필터 + 지점 필터. 지점 없는(null) 예약은 안 숨기고 표시(구분 위해).
   const bookingsOnDate = (ds) =>
-    bookings.filter((b) => b.date === ds && filterTeacher(b.teacher_id));
+    bookings.filter((b) => b.date === ds && filterTeacher(b.teacher_id) && (!b.branch_id || b.branch_id === branchId));
   // 상담은 선생님 필터 영향 안 받음 (원장 전체 일정)
   const consultsOnDate = (ds) =>
     consults.filter((c) => {
@@ -99,6 +100,16 @@ export default function AdminScheduleTab({ branchId }) {
       (c.needs ? `내용: ${c.needs}\n` : "") +
       (c.memo ? `메모: ${c.memo}` : "")
     );
+  };
+
+  // 예약 표시 텍스트: 시간 · 학생/반 · 수업명
+  const bookingLabel = (b) => {
+    const time = b.start_time?.slice(0, 5) ?? "";
+    const who = b.student?.name ?? b.course?.title ?? "수업";
+    const courseTitle = (b.enrollment?.courses?.title ?? b.course?.title ?? "").replace("1:1 ", "");
+    let txt = `${time} ${who}`;
+    if (courseTitle && b.student?.name) txt += ` ${courseTitle}`;
+    return txt;
   };
 
   const cells = [];
@@ -172,8 +183,10 @@ export default function AdminScheduleTab({ branchId }) {
                 ))}
                 {dayBookings.map((b) => (
                   <div key={b.id} className="truncate rounded bg-seum-blue/25 px-1 py-0.5 text-[9px] font-medium leading-tight text-seum-blue">
-                    {b.start_time?.slice(0, 5)} {b.student?.name}
-                    {pickTeacher === "all" && b.teacher?.name ? ` (${b.teacher.name})` : ""}
+                    {b.branch?.name ? `[${b.branch.name.replace("점", "")}] ` : ""}
+                    {bookingLabel(b)}
+                    {b.enrollment ? ` (${b.enrollment.remaining_sessions}/${b.enrollment.total_sessions})` : ""}
+                    {pickTeacher === "all" && b.teacher?.name ? ` ${b.teacher.name}쌤` : ""}
                   </div>
                 ))}
                 {dayConsults.map((c) => (
