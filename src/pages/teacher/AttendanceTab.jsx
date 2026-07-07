@@ -227,39 +227,14 @@ export default function AttendanceTab() {
     setSelectedCourse(null);
   };
 
-  // 1:1 출석 저장 (횟수 차감 포함)
+  // 1:1 출석 저장 (횟수 차감은 예약 때 이미 됨 - 여기선 기록만)
   const saveBooking = async () => {
     if (!selectedBooking) return;
     setLoading(true);
 
     const b = selectedBooking;
-    const prev = b.attended; // 이전 처리 상태 (null이면 첫 처리)
-    const enrId = b.enrollment_id;
 
-    // 차감 계산: 출석/결석 = 1 차감, 보류 = 차감 안 함
-    const countsAsUsed = (st) => st === "present" || st === "absent";
-    const wasUsed = prev ? countsAsUsed(prev) : false;
-    const nowUsed = countsAsUsed(oneStatus);
-
-    // 잔여 횟수 조정 (이전 대비 변화만 반영)
-    if (enrId && wasUsed !== nowUsed) {
-      const { data: enr } = await supabase
-        .from("enrollments")
-        .select("remaining_sessions")
-        .eq("id", enrId)
-        .single();
-      if (enr) {
-        let newRemain = enr.remaining_sessions;
-        if (!wasUsed && nowUsed) newRemain = Math.max(0, newRemain - 1); // 새로 차감
-        if (wasUsed && !nowUsed) newRemain = newRemain + 1; // 되돌림
-        await supabase
-          .from("enrollments")
-          .update({ remaining_sessions: newRemain })
-          .eq("id", enrId);
-      }
-    }
-
-    // 예약에 출석 상태 기록
+    // 예약에 출석 상태만 기록 (차감은 예약 잡을 때 이미 처리됨)
     await supabase
       .from("lesson_bookings")
       .update({ attended: oneStatus })
@@ -536,7 +511,7 @@ export default function AttendanceTab() {
             </button>
           </div>
           <p className="mt-2 text-xs text-slate-400">
-            ※ 출석·결석은 1회 차감, 보류는 차감되지 않습니다. (다시 저장하면 자동 조정)
+            ※ 잔여 횟수는 수업을 잡을 때 이미 차감되었습니다. 여기서는 출석 여부만 기록합니다.
           </p>
         </div>
       )}

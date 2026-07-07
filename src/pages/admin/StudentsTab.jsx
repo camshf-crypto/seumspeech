@@ -300,7 +300,7 @@ export default function StudentsTab({ branchId }) {
 
     if (error) { setAssigning(false); return alert("1:1 등록 실패: " + error.message); }
 
-    // 첫 수업 날짜가 있으면 lesson_bookings에 예약 생성
+    // 첫 수업 날짜가 있으면 lesson_bookings에 예약 생성 + 잔여 차감
     if (firstDate && newEnr) {
       const { error: bkErr } = await supabase.from("lesson_bookings").insert({
         teacher_id: oneTeacher,
@@ -311,6 +311,12 @@ export default function StudentsTab({ branchId }) {
         branch_id: branchId || null,
       });
       if (bkErr) { setAssigning(false); return alert("첫 수업 예약 실패: " + bkErr.message); }
+      // 잔여 1 차감
+      if (oneSessions > 0) {
+        await supabase.from("enrollments")
+          .update({ remaining_sessions: oneSessions - 1 })
+          .eq("id", newEnr.id);
+      }
     }
 
     setAssigning(false);
@@ -341,14 +347,38 @@ export default function StudentsTab({ branchId }) {
       branch_id: branchId || null,
     });
     if (error) return alert("수업 예약 실패: " + error.message);
+    // 잔여 1 차감
+    if (enroll.remaining_sessions > 0) {
+      await supabase.from("enrollments")
+        .update({ remaining_sessions: enroll.remaining_sessions - 1 })
+        .eq("id", enroll.id);
+    }
     setBookForm((p) => ({ ...p, [enroll.id]: { date: "", time: "14:00" } }));
-    await loadBookings(selected.id);
+    await refreshKeepOpen();
   };
 
   const removeBooking = async (id) => {
     if (!window.confirm("이 수업 예약을 삭제할까요?")) return;
+    // 삭제 전 정보 조회 후 잔여 복구
+    let target = null;
+    for (const key in bookingsMap) {
+      const found = (bookingsMap[key] ?? []).find((b) => b.id === id);
+      if (found) { target = found; break; }
+    }
     await supabase.from("lesson_bookings").delete().eq("id", id);
-    await loadBookings(selected.id);
+    if (target && target.enrollment_id) {
+      const { data: enr } = await supabase
+        .from("enrollments")
+        .select("remaining_sessions, total_sessions")
+        .eq("id", target.enrollment_id)
+        .single();
+      if (enr && enr.remaining_sessions < enr.total_sessions) {
+        await supabase.from("enrollments")
+          .update({ remaining_sessions: enr.remaining_sessions + 1 })
+          .eq("id", target.enrollment_id);
+      }
+    }
+    await refreshKeepOpen();
   };
 
   const openQuestionGen = (student) => {
