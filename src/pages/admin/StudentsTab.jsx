@@ -53,6 +53,7 @@ export default function StudentsTab({ branchId }) {
   // 1:1 등록 시 첫 수업
   const [firstDate, setFirstDate] = useState("");
   const [firstTime, setFirstTime] = useState("14:00");
+  const [firstEndTime, setFirstEndTime] = useState("15:00");
 
   const [jobCompany, setJobCompany] = useState("");
   const [jobPosition, setJobPosition] = useState("");
@@ -308,6 +309,7 @@ export default function StudentsTab({ branchId }) {
         enrollment_id: newEnr.id,
         date: firstDate,
         start_time: firstTime,
+        end_time: firstEndTime || null,
         branch_id: branchId || null,
       });
       if (bkErr) { setAssigning(false); return alert("첫 수업 예약 실패: " + bkErr.message); }
@@ -344,6 +346,7 @@ export default function StudentsTab({ branchId }) {
       enrollment_id: enroll.id,
       date: form.date,
       start_time: form.time || "14:00",
+      end_time: form.endTime || null,
       branch_id: branchId || null,
     });
     if (error) return alert("수업 예약 실패: " + error.message);
@@ -694,9 +697,11 @@ export default function StudentsTab({ branchId }) {
                                 ))}
                               </div>
                             )}
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <input type="date" value={bf.date} onChange={(ev) => setBookForm((p) => ({ ...p, [e.id]: { ...bf, date: ev.target.value } }))} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-seum-blue" />
                               <input type="time" value={bf.time} onChange={(ev) => setBookForm((p) => ({ ...p, [e.id]: { ...bf, time: ev.target.value } }))} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-seum-blue" />
+                              <span className="text-xs text-slate-400">~</span>
+                              <input type="time" value={bf.endTime ?? "15:00"} onChange={(ev) => setBookForm((p) => ({ ...p, [e.id]: { ...bf, endTime: ev.target.value } }))} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-seum-blue" />
                               <button type="button" onClick={() => addBookingToEnroll(e)} className="rounded-lg bg-seum-blue px-3 py-1 text-xs font-bold text-white hover:bg-[#2a63c4]">수업 잡기</button>
                             </div>
                             <p className="mt-1 text-[11px] text-slate-400">※ 담임 지정 후 저장해야 예약할 수 있습니다.</p>
@@ -781,9 +786,11 @@ export default function StudentsTab({ branchId }) {
                       {/* 첫 수업 날짜·시간 (선택) */}
                       <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                         <p className="mb-1.5 text-xs font-medium text-slate-500">첫 수업 일정 (선택)</p>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <input type="date" value={firstDate} onChange={(e) => setFirstDate(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
                           <input type="time" value={firstTime} onChange={(e) => setFirstTime(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+                          <span className="text-sm text-slate-400">~</span>
+                          <input type="time" value={firstEndTime} onChange={(e) => setFirstEndTime(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
                         </div>
                         <p className="mt-1 text-[11px] text-slate-400">비워두면 선생님이 나중에 잡습니다.</p>
                       </div>

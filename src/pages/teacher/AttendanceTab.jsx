@@ -369,7 +369,7 @@ export default function AttendanceTab() {
                       )}
                     </div>
                     <p className="text-sm text-slate-500">
-                      {b.start_time?.slice(0, 5)} · {(b.enrollment?.courses?.title ?? "").replace("1:1 ", "")}
+                      {b.start_time?.slice(0, 5)}{b.end_time ? `~${b.end_time.slice(0, 5)}` : ""} · {(b.enrollment?.courses?.title ?? "").replace("1:1 ", "")}
                     </p>
                     <p className="mt-1 text-xs text-slate-400">
                       {b.branch?.name ? `${b.branch.name} · ` : ""}

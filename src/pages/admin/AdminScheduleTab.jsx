@@ -105,9 +105,10 @@ export default function AdminScheduleTab({ branchId }) {
   // 예약 표시 텍스트: 시간 · 학생/반 · 수업명
   const bookingLabel = (b) => {
     const time = b.start_time?.slice(0, 5) ?? "";
+    const endTime = b.end_time ? `~${b.end_time.slice(0, 5)}` : "";
     const who = b.student?.name ?? b.course?.title ?? "수업";
     const courseTitle = (b.enrollment?.courses?.title ?? b.course?.title ?? "").replace("1:1 ", "");
-    let txt = `${time} ${who}`;
+    let txt = `${time}${endTime} ${who}`;
     if (courseTitle && b.student?.name) txt += ` ${courseTitle}`;
     return txt;
   };

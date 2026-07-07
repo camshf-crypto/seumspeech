@@ -31,6 +31,7 @@ export default function AvailabilityTab() {
   const [lessonEnroll, setLessonEnroll] = useState("");
   const [lessonCourse, setLessonCourse] = useState("");
   const [lessonTime, setLessonTime] = useState("14:00");
+  const [lessonEndTime, setLessonEndTime] = useState("15:00");
   const [lessonBranch, setLessonBranch] = useState("");
   const [lessonMemo, setLessonMemo] = useState("");
   const [lessonSaving, setLessonSaving] = useState(false);
@@ -38,6 +39,7 @@ export default function AvailabilityTab() {
   // 예약 수정 팝업
   const [editBooking, setEditBooking] = useState(null);
   const [eTime, setETime] = useState("14:00");
+  const [eEndTime, setEEndTime] = useState("15:00");
   const [eBranch, setEBranch] = useState("");
   const [eMemo, setEMemo] = useState("");
   const [eSaving, setESaving] = useState(false);
@@ -45,6 +47,7 @@ export default function AvailabilityTab() {
   const openEdit = (b) => {
     setEditBooking(b);
     setETime(b.start_time?.slice(0, 5) ?? "14:00");
+    setEEndTime(b.end_time?.slice(0, 5) ?? "15:00");
     setEBranch(b.branch_id ?? "");
     setEMemo(b.memo ?? "");
   };
@@ -56,6 +59,7 @@ export default function AvailabilityTab() {
       .from("lesson_bookings")
       .update({
         start_time: eTime,
+        end_time: eEndTime || null,
         branch_id: eBranch || null,
         memo: eMemo.trim() || null,
       })
@@ -200,6 +204,7 @@ export default function AvailabilityTab() {
       teacher_id: user.id,
       date: selectedDate,
       start_time: lessonTime,
+      end_time: lessonEndTime || null,
       branch_id: lessonBranch || null,
       memo: lessonMemo.trim() || null,
     };
@@ -241,6 +246,7 @@ export default function AvailabilityTab() {
     setLessonEnroll("");
     setLessonCourse("");
     setLessonMemo("");
+    setLessonEndTime("15:00");
     load();
   };
 
@@ -343,7 +349,7 @@ export default function AvailabilityTab() {
                     {/* 예약된 수업 (파랑, 진하게) - 1:1 학생 또는 단체반 */}
                     {dayBookings.map((b) => (
                       <div key={b.id} className="truncate rounded bg-seum-blue/25 px-1 py-0.5 text-[9px] font-medium leading-tight text-seum-blue">
-                        {b.start_time?.slice(0, 5)} {b.student?.name ?? b.course?.title ?? "수업"}
+                        {b.start_time?.slice(0, 5)}{b.end_time ? `~${b.end_time.slice(0, 5)}` : ""} {b.student?.name ?? b.course?.title ?? "수업"}
                       </div>
                     ))}
                   </div>
@@ -469,8 +475,12 @@ export default function AvailabilityTab() {
                   )}
 
                   <div>
-                    <label className="mb-1 block text-xs text-slate-500">수업 시작 시간</label>
-                    <input type="time" value={lessonTime} onChange={(e) => setLessonTime(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+                    <label className="mb-1 block text-xs text-slate-500">수업 시간</label>
+                    <div className="flex items-center gap-2">
+                      <input type="time" value={lessonTime} onChange={(e) => setLessonTime(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+                      <span className="text-sm text-slate-400">~</span>
+                      <input type="time" value={lessonEndTime} onChange={(e) => setLessonEndTime(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+                    </div>
                   </div>
                   <div>
                     <label className="mb-1 block text-xs text-slate-500">지점</label>
@@ -497,7 +507,7 @@ export default function AvailabilityTab() {
                       <div key={b.id} className="flex items-start justify-between rounded-lg bg-blue-50 px-3 py-2">
                         <button onClick={() => openEdit(b)} className="min-w-0 flex-1 text-left">
                           <p className="text-sm font-medium text-seum-blue">
-                            {b.start_time?.slice(0, 5)} · {b.student?.name ?? b.course?.title ?? "수업"}
+                            {b.start_time?.slice(0, 5)}{b.end_time ? `~${b.end_time.slice(0, 5)}` : ""} · {b.student?.name ?? b.course?.title ?? "수업"}
                             {b.course_id && !b.student_id ? <span className="ml-1 text-[11px] text-slate-400">(단체반)</span> : null}
                             {b.enrollment ? <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-bold text-seum-blue">{b.enrollment.remaining_sessions}/{b.enrollment.total_sessions}회</span> : null}
                             {b.branch?.name ? <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">{b.branch.name}</span> : null}
@@ -547,8 +557,12 @@ export default function AvailabilityTab() {
             </div>
 
             <div>
-              <label className="mb-1 block text-xs text-slate-500">수업 시작 시간</label>
-              <input type="time" value={eTime} onChange={(e) => setETime(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+              <label className="mb-1 block text-xs text-slate-500">수업 시간</label>
+              <div className="flex items-center gap-2">
+                <input type="time" value={eTime} onChange={(e) => setETime(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+                <span className="text-sm text-slate-400">~</span>
+                <input type="time" value={eEndTime} onChange={(e) => setEEndTime(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-xs text-slate-500">지점</label>
