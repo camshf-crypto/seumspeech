@@ -231,7 +231,16 @@ export default function AvailabilityTab() {
       return;
     }
 
-    // 잔여 차감은 DB 트리거가 자동 처리함 (여기서 하지 않음)
+    // 1:1 예약이면 잔여 횟수 1 차감
+    if (lessonKind === "one") {
+      const enr = oneStudents.find((e) => e.id === lessonEnroll);
+      if (enr && enr.remaining_sessions > 0) {
+        await supabase
+          .from("enrollments")
+          .update({ remaining_sessions: enr.remaining_sessions - 1 })
+          .eq("id", enr.id);
+      }
+    }
 
     setLessonSaving(false);
     setLessonEnroll("");
@@ -243,8 +252,22 @@ export default function AvailabilityTab() {
 
   const removeLesson = async (id) => {
     if (!window.confirm("이 수업 예약을 삭제할까요?")) return;
-    // 잔여 복구는 DB 트리거가 자동 처리함
+    // 삭제 전 예약 정보 조회 (1:1이면 잔여 복구)
+    const target = bookings.find((b) => b.id === id);
     await supabase.from("lesson_bookings").delete().eq("id", id);
+    if (target && target.enrollment_id && target.student_id) {
+      const { data: enr } = await supabase
+        .from("enrollments")
+        .select("remaining_sessions, total_sessions")
+        .eq("id", target.enrollment_id)
+        .single();
+      if (enr && enr.remaining_sessions < enr.total_sessions) {
+        await supabase
+          .from("enrollments")
+          .update({ remaining_sessions: enr.remaining_sessions + 1 })
+          .eq("id", target.enrollment_id);
+      }
+    }
     load();
   };
 
