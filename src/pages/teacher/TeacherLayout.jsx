@@ -9,6 +9,7 @@ import TeacherNotificationsTab from "./TeacherNotificationsTab";
 import TeacherSettlementTab from "./TeacherSettlementTab";
 import StudentMaterialsView from "../../components/StudentMaterialsView";
 import TeacherInterviewTab from "./TeacherInterviewTab";
+import TeacherMemosTab from "./TeacherMemosTab";
 import TeacherMyPageTab from "./TeacherMyPageTab";
 
 export default function TeacherLayout() {
@@ -65,6 +66,7 @@ export default function TeacherLayout() {
     { key: "chat", label: "학생 채팅" },
     { key: "notifications", label: "알림" },
     { key: "settlement", label: "수업 정산" },
+    { key: "memos", label: "받은 상담 메모" },
     { key: "mypage", label: "마이페이지" },
   ];
 
@@ -94,6 +96,8 @@ export default function TeacherLayout() {
         );
       case "settlement":
         return <TeacherSettlementTab teacherId={profile.id} />;
+      case "memos":
+        return <TeacherMemosTab teacherId={profile.id} />;
       case "mypage":
         return <TeacherMyPageTab teacherId={profile.id} />;
       default:

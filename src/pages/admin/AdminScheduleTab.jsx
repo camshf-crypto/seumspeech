@@ -8,6 +8,39 @@ const STATUS_LABEL = {
   enrolled: "등록전환", dropped: "미등록종료",
 };
 
+// 출결 상태 뱃지 (보류=회색, 출석=초록, 결석=빨강, 지각=주황)
+const ATTEND_BADGE = {
+  present: { label: "출석", cls: "bg-green-100 text-green-700" },
+  absent: { label: "결석", cls: "bg-red-100 text-red-600" },
+  hold: { label: "보류", cls: "bg-slate-200 text-slate-500" },
+  late: { label: "지각", cls: "bg-amber-100 text-amber-700" },
+};
+
+// enrollment별로 "그 시점 잔여" 계산 (보류 제외, 시간순 차감)
+function computeRunningRemaining(allBookings) {
+  const byEnr = {};
+  (allBookings ?? []).forEach((b) => {
+    if (!b.enrollment_id) return;
+    (byEnr[b.enrollment_id] = byEnr[b.enrollment_id] || []).push(b);
+  });
+  const map = {};
+  Object.values(byEnr).forEach((list) => {
+    const sorted = [...list].sort((a, b) => {
+      const da = `${a.date ?? ""} ${a.start_time ?? ""}`;
+      const db = `${b.date ?? ""} ${b.start_time ?? ""}`;
+      return da < db ? -1 : da > db ? 1 : 0;
+    });
+    const total = sorted[0]?.enrollment?.total_sessions ?? 0;
+    let used = 0;
+    sorted.forEach((b) => {
+      const isHold = b.attended === "hold";
+      if (!isHold) used += 1;
+      map[b.id] = { isHold, total, remainAfter: isHold ? null : total - used };
+    });
+  });
+  return map;
+}
+
 export default function AdminScheduleTab({ branchId }) {
   const [slots, setSlots] = useState([]);
   const [courses, setCourses] = useState([]);
@@ -17,6 +50,7 @@ export default function AdminScheduleTab({ branchId }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pickTeacher, setPickTeacher] = useState("all");
+  const [selectedDate, setSelectedDate] = useState(null);
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
@@ -66,17 +100,15 @@ export default function AdminScheduleTab({ branchId }) {
   const filterTeacher = (tid) => pickTeacher === "all" || tid === pickTeacher;
 
   const slotsOnDate = (ds) =>
-    slots.filter((s) => s.date === ds && filterTeacher(s.teacher_id) && (!s.branch_id || s.branch_id === branchId));
+    slots.filter((s) => s.date === ds && filterTeacher(s.teacher_id) && s.branch_id === branchId);
   const coursesOnDate = (ds) => {
     const wd = new Date(ds).getDay();
     return courses.filter(
       (c) => c.weekday === wd && c.branch_id === branchId && filterTeacher(c.teacher_id)
     );
   };
-  // 예약: 선생님 필터 + 지점 필터. 지점 없는(null) 예약은 안 숨기고 표시(구분 위해).
   const bookingsOnDate = (ds) =>
-    bookings.filter((b) => b.date === ds && filterTeacher(b.teacher_id) && (!b.branch_id || b.branch_id === branchId));
-  // 상담은 선생님 필터 영향 안 받음 (원장 전체 일정)
+    bookings.filter((b) => b.date === ds && filterTeacher(b.teacher_id) && b.branch_id === branchId);
   const consultsOnDate = (ds) =>
     consults.filter((c) => {
       if (!c.scheduled_at) return false;
@@ -113,16 +145,114 @@ export default function AdminScheduleTab({ branchId }) {
     return txt;
   };
 
+  // 모든 1:1 예약의 "그 시점 잔여" 미리 계산
+  const remainingMap = computeRunningRemaining(bookings);
+
   const cells = [];
   for (let i = 0; i < firstDay; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
-  const prevMonth = () =>
+  const prevMonth = () => {
+    setSelectedDate(null);
     setCursor((c) => (c.month === 0 ? { year: c.year - 1, month: 11 } : { year: c.year, month: c.month - 1 }));
-  const nextMonth = () =>
+  };
+  const nextMonth = () => {
+    setSelectedDate(null);
     setCursor((c) => (c.month === 11 ? { year: c.year + 1, month: 0 } : { year: c.year, month: c.month + 1 }));
+  };
 
   if (loading) return <p className="text-slate-400">불러오는 중...</p>;
+
+  // 셀 내 예약 색 (출결 상태별)
+  const bookingCellCls = (b) =>
+    b.attended === "hold" ? "bg-slate-200 text-slate-500"
+    : b.attended === "present" ? "bg-green-500/25 text-green-700"
+    : b.attended === "absent" ? "bg-red-500/25 text-red-600"
+    : b.attended === "late" ? "bg-amber-500/25 text-amber-700"
+    : "bg-seum-blue/25 text-seum-blue";
+  const bookingMark = (b) =>
+    b.attended === "hold" ? "[보류] "
+    : b.attended === "present" ? "[출석] "
+    : b.attended === "absent" ? "[결석] "
+    : b.attended === "late" ? "[지각] "
+    : "";
+
+  // ===== 선택한 날짜 상세 (보기 전용) =====
+  const selSlots = selectedDate ? slotsOnDate(selectedDate) : [];
+  const selCourses = selectedDate ? coursesOnDate(selectedDate) : [];
+  const selBookings = selectedDate ? bookingsOnDate(selectedDate) : [];
+  const selConsults = selectedDate ? consultsOnDate(selectedDate) : [];
+
+  const detailPanel = (
+    <div className="rounded-xl border border-slate-200 bg-white p-5">
+      <h4 className="mb-3 font-bold text-seum-navy">
+        {month + 1}월 {Number(selectedDate?.slice(-2))}일 ({selectedDate ? WEEKDAYS[new Date(selectedDate).getDay()] : ""}) 일정
+      </h4>
+
+      {/* 방문상담 */}
+      {selConsults.length > 0 && (
+        <div className="mb-4">
+          <p className="mb-1.5 text-xs font-bold text-amber-600">방문상담</p>
+          <div className="space-y-1.5">
+            {selConsults.map((c) => (
+              <button key={c.id} onClick={() => showConsult(c)}
+                className="block w-full rounded-lg bg-amber-50 px-3 py-2 text-left text-sm text-amber-700 hover:bg-amber-100">
+                🗓 {consultTime(c.scheduled_at)} · {c.name} ({STATUS_LABEL[c.status] || c.status})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 수업 예약 */}
+      {selBookings.length > 0 && (
+        <div className="mb-4">
+          <p className="mb-1.5 text-xs font-bold text-seum-blue">수업</p>
+          <div className="space-y-1.5">
+            {selBookings.map((b) => {
+              const rm = remainingMap[b.id];
+              const badge = b.attended ? ATTEND_BADGE[b.attended] : null;
+              return (
+                <div key={b.id} className="rounded-lg bg-blue-50 px-3 py-2 text-sm">
+                  <p className="font-medium text-seum-blue">
+                    {b.start_time?.slice(0, 5)}{b.end_time ? `~${b.end_time.slice(0, 5)}` : ""} · {b.student?.name ?? b.course?.title ?? "수업"}
+                    {b.course_id && !b.student_id ? <span className="ml-1 text-[11px] text-slate-400">(단체반)</span> : null}
+                    {badge ? <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[11px] font-bold ${badge.cls}`}>{badge.label}</span> : null}
+                    {rm && rm.remainAfter != null ? (
+                      <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-bold text-seum-blue">{rm.remainAfter}/{rm.total}회</span>
+                    ) : null}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-slate-400">
+                    {b.teacher?.name ? `${b.teacher.name}쌤` : ""}
+                    {b.branch?.name ? ` · ${b.branch.name}` : ""}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 정규 단체반 */}
+      {selCourses.length > 0 && (
+        <div className="mb-4">
+          <p className="mb-1.5 text-xs font-bold text-seum-blue">정규 단체반</p>
+          <div className="space-y-1.5">
+            {selCourses.map((c) => (
+              <div key={c.id} className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-seum-blue">
+                {c.start_time?.slice(0, 5)} · {c.title}
+                {c.teacher?.name ? <span className="ml-1.5 text-[11px] text-slate-400">{c.teacher.name}쌤</span> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {selConsults.length === 0 && selBookings.length === 0 && selCourses.length === 0 && (
+        <p className="py-6 text-center text-sm text-slate-400">이 날 일정이 없습니다.</p>
+      )}
+    </div>
+  );
 
   return (
     <div>
@@ -145,66 +275,113 @@ export default function AdminScheduleTab({ branchId }) {
         ))}
       </div>
 
-      {/* 달력 */}
-      <div className="mb-3 flex items-center justify-between">
-        <button onClick={prevMonth} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">←</button>
-        <h3 className="text-lg font-bold text-seum-navy">{year}년 {month + 1}월</h3>
-        <button onClick={nextMonth} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">→</button>
-      </div>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3 lg:items-start">
+        {/* 달력 */}
+        <div className="lg:col-span-2 lg:sticky lg:top-4">
+          <div className="mb-3 flex items-center justify-between">
+            <button onClick={prevMonth} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">←</button>
+            <h3 className="text-lg font-bold text-seum-navy">{year}년 {month + 1}월</h3>
+            <button onClick={nextMonth} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">→</button>
+          </div>
 
-      <div className="mb-1 grid grid-cols-7 gap-1">
-        {WEEKDAYS.map((d, i) => (
-          <div key={d} className={`py-2 text-center text-xs font-bold ${i === 0 ? "text-red-400" : i === 6 ? "text-blue-400" : "text-slate-400"}`}>{d}</div>
-        ))}
-      </div>
+          <div className="mb-1 grid grid-cols-7 gap-1">
+            {WEEKDAYS.map((d, i) => (
+              <div key={d} className={`py-2 text-center text-xs font-bold ${i === 0 ? "text-red-400" : i === 6 ? "text-blue-400" : "text-slate-400"}`}>{d}</div>
+            ))}
+          </div>
 
-      <div className="grid grid-cols-7 gap-1">
-        {cells.map((d, idx) => {
-          if (d === null) return <div key={`empty-${idx}`} className="min-h-[110px]" />;
-          const ds = dateStr(d);
-          const wd = new Date(year, month, d).getDay();
-          const daySlots = slotsOnDate(ds);
-          const dayCourses = coursesOnDate(ds);
-          const dayConsults = consultsOnDate(ds);
-          const dayBookings = bookingsOnDate(ds);
-          return (
-            <div key={d} className="min-h-[110px] rounded-lg border border-slate-200 bg-white p-1.5 align-top">
-              <span className={`text-xs font-bold ${wd === 0 ? "text-red-400" : wd === 6 ? "text-blue-400" : "text-slate-600"}`}>{d}</span>
-              <div className="mt-1 space-y-0.5">
-                {daySlots.map((s) => (
-                  <div key={s.id} className="truncate rounded bg-green-500/15 px-1 py-0.5 text-[9px] leading-tight text-green-700">
-                    {s.start_time.slice(0, 5)}~{s.end_time.slice(0, 5)}
-                    {pickTeacher === "all" && s.teacher?.name && ` ${s.teacher.name}`}
+          <div className="grid grid-cols-7 gap-1">
+            {cells.map((d, idx) => {
+              if (d === null) return <div key={`empty-${idx}`} className="min-h-[110px]" />;
+              const ds = dateStr(d);
+              const wd = new Date(year, month, d).getDay();
+              const daySlots = slotsOnDate(ds);
+              const dayCourses = coursesOnDate(ds);
+              const dayConsults = consultsOnDate(ds);
+              const dayBookings = bookingsOnDate(ds);
+              const isSelected = selectedDate === ds;
+              return (
+                <button
+                  key={d}
+                  onClick={() => setSelectedDate(ds)}
+                  className={`flex min-h-[110px] w-full flex-col rounded-lg border p-1.5 text-left align-top transition ${
+                    isSelected ? "border-seum-blue bg-blue-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                  }`}
+                >
+                  <span className={`text-xs font-bold ${wd === 0 ? "text-red-400" : wd === 6 ? "text-blue-400" : "text-slate-600"}`}>{d}</span>
+                  <div className="mt-1 space-y-0.5">
+                    {daySlots.map((s) => (
+                      <div key={s.id} className="truncate rounded bg-purple-500/15 px-1 py-0.5 text-[9px] leading-tight text-purple-700">
+                        {s.start_time.slice(0, 5)}~{s.end_time.slice(0, 5)}
+                        {pickTeacher === "all" && s.teacher?.name && ` ${s.teacher.name}`}
+                      </div>
+                    ))}
+                    {dayCourses.map((c) => (
+                      <div key={c.id} className="truncate rounded bg-seum-blue/15 px-1 py-0.5 text-[9px] leading-tight text-seum-blue">
+                        [{branchName(c.branch_id)}] {c.start_time?.slice(0, 5)} {c.title}
+                      </div>
+                    ))}
+                    {dayBookings.map((b) => (
+                      <div key={b.id} className={`truncate rounded px-1 py-0.5 text-[9px] font-medium leading-tight ${bookingCellCls(b)}`}>
+                        {bookingMark(b)}
+                        {b.branch?.name ? `[${b.branch.name.replace("점", "")}] ` : ""}
+                        {bookingLabel(b)}
+                        {(() => { const rm = remainingMap[b.id]; return rm && rm.remainAfter != null ? ` (${rm.remainAfter}/${rm.total})` : ""; })()}
+                        {pickTeacher === "all" && b.teacher?.name ? ` ${b.teacher.name}쌤` : ""}
+                      </div>
+                    ))}
+                    {dayConsults.map((c) => (
+                      <div
+                        key={c.id}
+                        className="block w-full truncate rounded bg-amber-500/20 px-1 py-0.5 text-left text-[9px] leading-tight text-amber-700"
+                      >
+                        🗓 {consultTime(c.scheduled_at)} {c.name} 상담
+                      </div>
+                    ))}
                   </div>
-                ))}
-                {dayCourses.map((c) => (
-                  <div key={c.id} className="truncate rounded bg-seum-blue/15 px-1 py-0.5 text-[9px] leading-tight text-seum-blue">
-                    [{branchName(c.branch_id)}] {c.start_time?.slice(0, 5)} {c.title}
-                  </div>
-                ))}
-                {dayBookings.map((b) => (
-                  <div key={b.id} className="truncate rounded bg-seum-blue/25 px-1 py-0.5 text-[9px] font-medium leading-tight text-seum-blue">
-                    {b.branch?.name ? `[${b.branch.name.replace("점", "")}] ` : ""}
-                    {bookingLabel(b)}
-                    {b.enrollment ? ` (${b.enrollment.remaining_sessions}/${b.enrollment.total_sessions})` : ""}
-                    {pickTeacher === "all" && b.teacher?.name ? ` ${b.teacher.name}쌤` : ""}
-                  </div>
-                ))}
-                {dayConsults.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => showConsult(c)}
-                    className="block w-full truncate rounded bg-amber-500/20 px-1 py-0.5 text-left text-[9px] leading-tight text-amber-700 hover:bg-amber-500/30"
-                  >
-                    🗓 {consultTime(c.scheduled_at)} {c.name} 상담
-                  </button>
-                ))}
-              </div>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs text-slate-400">보라 = 가능시간 / 파랑 = 수업 / 주황 = 방문상담 · 출석(초록) 결석(빨강) 보류(회색)</p>
+        </div>
+
+        {/* 오른쪽 상세 - 데스크탑 */}
+        <div className="hidden lg:col-span-1 lg:block">
+          {!selectedDate ? (
+            <div className="flex min-h-[200px] items-center justify-center rounded-xl border border-dashed border-slate-300 text-center text-sm text-slate-400">
+              날짜를 선택하세요.
             </div>
-          );
-        })}
+          ) : (
+            detailPanel
+          )}
+        </div>
       </div>
-      <p className="mt-2 text-xs text-slate-400">초록 = 선생님 가능시간 / 파랑 = 수업 / 주황 = 방문상담 (클릭 시 상세)</p>
+
+      {/* 모바일 상세 - 팝업 */}
+      {selectedDate && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 lg:hidden"
+          onClick={() => setSelectedDate(null)}
+        >
+          <div
+            className="flex h-[85vh] w-full flex-col rounded-t-2xl bg-slate-50"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <h3 className="font-bold text-seum-navy">
+                {month + 1}월 {Number(selectedDate.slice(-2))}일 ({WEEKDAYS[new Date(selectedDate).getDay()]}) 일정
+              </h3>
+              <button onClick={() => setSelectedDate(null)} className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-500 hover:bg-white">
+                닫기 ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {detailPanel}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

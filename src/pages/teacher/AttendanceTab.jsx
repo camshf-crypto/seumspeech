@@ -6,15 +6,21 @@ const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
 const OPTIONS = [
   { v: "present", label: "출석", c: "bg-green-500" },
-  { v: "absent", label: "결석", c: "bg-red-400" },
+  { v: "absent", label: "결석", c: "bg-red-500" },
   { v: "hold", label: "보류", c: "bg-slate-400" },
 ];
 
 const STATUS_LABEL = {
   present: { label: "출석", c: "text-green-600 bg-green-50" },
-  absent: { label: "결석", c: "text-red-500 bg-red-50" },
+  absent: { label: "결석", c: "text-red-600 bg-red-50" },
   hold: { label: "보류", c: "text-slate-500 bg-slate-100" },
   late: { label: "지각", c: "text-amber-600 bg-amber-50" },
+};
+
+const fmtDate = (ds) => {
+  if (!ds) return "-";
+  const d = new Date(ds);
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
 };
 
 const todayStr = () => {
@@ -47,6 +53,10 @@ export default function AttendanceTab() {
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  // 결석 신청 (담당 학생 pending)
+  const [absenceReqs, setAbsenceReqs] = useState([]);
+  const [absenceBusyId, setAbsenceBusyId] = useState(null);
+
   const weekNo = (startDate) => {
     if (!startDate) return null;
     const start = new Date(startDate);
@@ -54,6 +64,78 @@ export default function AttendanceTab() {
     const diffDays = Math.floor((cur - start) / (1000 * 60 * 60 * 24));
     if (diffDays < 0) return null;
     return Math.floor(diffDays / 7) + 1;
+  };
+
+  // 담당 학생의 검토 대기 결석 신청 로드
+  const loadAbsenceReqs = async () => {
+    // 내 담당 학생(enrollment teacher_id = 나)
+    const { data: enr } = await supabase
+      .from("enrollments")
+      .select("student_id")
+      .eq("teacher_id", user.id);
+    const myStudentIds = [...new Set((enr ?? []).map((e) => e.student_id))];
+    if (myStudentIds.length === 0) {
+      setAbsenceReqs([]);
+      return;
+    }
+    const { data: reqs } = await supabase
+      .from("absence_requests")
+      .select("*, student:student_id(name), courses(title, branch:branch_id(name)), booking:booking_id(start_time, end_time)")
+      .eq("status", "pending")
+      .in("student_id", myStudentIds)
+      .order("created_at", { ascending: false });
+    setAbsenceReqs(reqs ?? []);
+  };
+
+  const approveAbsence = async (r) => {
+    setAbsenceBusyId(r.id);
+
+    // 1) 신청 인정 처리
+    const { error } = await supabase
+      .from("absence_requests")
+      .update({ status: "approved", reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+      .eq("id", r.id);
+
+    if (error) {
+      setAbsenceBusyId(null);
+      return alert("처리 실패: " + error.message);
+    }
+
+    // 2) 1:1 예약이면 그 예약(booking_id) 하나만 보류(hold) 처리
+    //    (횟수 remaining_sessions는 건드리지 않음 · 학생이 다른 날 다시 잡으면 됨)
+    //    단체반이면 booking_id가 없으니 이 단계는 건너뜀
+    if (r.booking_id) {
+      await supabase
+        .from("lesson_bookings")
+        .update({ attended: "hold" })
+        .eq("id", r.booking_id);
+    }
+
+    setAbsenceBusyId(null);
+    alert(`${r.student?.name ?? "학생"}님의 결석을 인정 처리했습니다. (수업 보류 · 횟수 차감 안 됨)`);
+    loadAbsenceReqs();
+    loadCourses();
+  };
+
+  const rejectAbsence = async (r) => {
+    const reason = window.prompt(
+      "불인정 사유를 입력하세요. (학생에게 표시됩니다)\n예: 증빙 서류가 사유와 맞지 않습니다."
+    );
+    if (reason === null) return;
+    setAbsenceBusyId(r.id);
+    const { error } = await supabase
+      .from("absence_requests")
+      .update({
+        status: "rejected",
+        reviewed_by: user.id,
+        reviewed_at: new Date().toISOString(),
+        reject_reason: reason || "사유 불충분",
+      })
+      .eq("id", r.id);
+    setAbsenceBusyId(null);
+    if (error) return alert("처리 실패: " + error.message);
+    alert("불인정 처리했습니다. (수업 횟수 차감 대상)");
+    loadAbsenceReqs();
   };
 
   const loadCourses = async () => {
@@ -112,7 +194,10 @@ export default function AttendanceTab() {
   };
 
   useEffect(() => {
-    if (user) loadCourses();
+    if (user) {
+      loadCourses();
+      loadAbsenceReqs();
+    }
   }, [user, date]);
 
   const openCourse = async (course) => {
@@ -292,6 +377,87 @@ export default function AttendanceTab() {
         </div>
       </div>
 
+      {/* 결석 신청 (담당 학생 검토 대기) - 목록 화면에서만 노출 */}
+      {!selectedCourse && !selectedBooking && absenceReqs.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h4 className="text-sm font-bold text-amber-700">
+              결석 신청 검토 대기
+            </h4>
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">
+              {absenceReqs.length}건
+            </span>
+          </div>
+          <div className="space-y-3">
+            {absenceReqs.map((r) => (
+              <div key={r.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="font-bold text-seum-navy">
+                      {r.student?.name ?? "학생"}
+                      <span className="ml-2 text-xs font-normal text-slate-400">
+                        {r.courses?.title}
+                        {r.courses?.branch?.name ? ` · ${r.courses.branch.name}` : ""}
+                      </span>
+                    </p>
+                    <p className="mt-0.5 text-sm text-slate-600">
+                      결석일 {fmtDate(r.date)}
+                      {r.booking?.start_time ? (
+                        <span className="ml-1 text-slate-500">
+                          {r.booking.start_time.slice(0, 5)}
+                          {r.booking.end_time ? `~${r.booking.end_time.slice(0, 5)}` : ""}
+                        </span>
+                      ) : null}
+                      {r.reason_type ? (
+                        <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
+                          {r.reason_type}
+                        </span>
+                      ) : null}
+                    </p>
+                  </div>
+                  <span className="text-xs text-slate-400">{fmtDate(r.created_at)} 신청</span>
+                </div>
+
+                <p className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  {r.reason}
+                </p>
+
+                {r.file_url ? (
+                  <button
+                    type="button"
+                    onClick={() => window.open(r.file_url, "_blank", "noopener,noreferrer")}
+                    className="mt-2 text-sm font-medium text-seum-blue hover:underline"
+                  >
+                    📎 증빙 서류 보기
+                  </button>
+                ) : (
+                  <p className="mt-2 text-xs text-red-500">증빙 서류 없음</p>
+                )}
+
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => rejectAbsence(r)}
+                    disabled={absenceBusyId === r.id}
+                    className="rounded-lg border border-red-200 px-4 py-1.5 text-sm font-medium text-red-500 hover:bg-red-50 disabled:opacity-60"
+                  >
+                    불인정 (차감)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => approveAbsence(r)}
+                    disabled={absenceBusyId === r.id}
+                    className="rounded-lg bg-seum-blue px-4 py-1.5 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60"
+                  >
+                    {absenceBusyId === r.id ? "처리 중..." : "인정 (차감 안 함)"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 목록 (단체반 + 1:1) */}
       {!selectedCourse && !selectedBooking && (
         <div className="space-y-5">
@@ -350,33 +516,36 @@ export default function AttendanceTab() {
               </p>
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {oneBookings.map((b) => (
-                  <button
-                    key={b.id}
-                    onClick={() => openBooking(b)}
-                    className="rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-seum-blue hover:bg-blue-50"
-                  >
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="font-bold text-seum-navy">{b.student?.name ?? "학생"}</span>
-                      {b.attended ? (
-                        <span className="rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-600">
-                          {STATUS_LABEL[b.attended]?.label ?? "완료"}
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-600">
-                          수업예정
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-slate-500">
-                      {b.start_time?.slice(0, 5)}{b.end_time ? `~${b.end_time.slice(0, 5)}` : ""} · {(b.enrollment?.courses?.title ?? "").replace("1:1 ", "")}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      {b.branch?.name ? `${b.branch.name} · ` : ""}
-                      잔여 {b.enrollment?.remaining_sessions ?? "-"}/{b.enrollment?.total_sessions ?? "-"}회
-                    </p>
-                  </button>
-                ))}
+                {oneBookings.map((b) => {
+                  const st = STATUS_LABEL[b.attended];
+                  return (
+                    <button
+                      key={b.id}
+                      onClick={() => openBooking(b)}
+                      className="rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-seum-blue hover:bg-blue-50"
+                    >
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="font-bold text-seum-navy">{b.student?.name ?? "학생"}</span>
+                        {b.attended ? (
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${st?.c ?? "bg-slate-100 text-slate-500"}`}>
+                            {st?.label ?? "완료"}
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-600">
+                            수업예정
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-slate-500">
+                        {b.start_time?.slice(0, 5)}{b.end_time ? `~${b.end_time.slice(0, 5)}` : ""} · {(b.enrollment?.courses?.title ?? "").replace("1:1 ", "")}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {b.branch?.name ? `${b.branch.name} · ` : ""}
+                        잔여 {b.enrollment?.remaining_sessions ?? "-"}/{b.enrollment?.total_sessions ?? "-"}회
+                      </p>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -483,7 +652,7 @@ export default function AttendanceTab() {
           <p className="mb-4 text-xs text-slate-400">
             {(selectedBooking.enrollment?.courses?.title ?? "").replace("1:1 ", "")}
             {selectedBooking.branch?.name ? ` · ${selectedBooking.branch.name}` : ""}
-            {" · "}{selectedBooking.start_time?.slice(0, 5)}
+            {" · "}{selectedBooking.start_time?.slice(0, 5)}{selectedBooking.end_time ? `~${selectedBooking.end_time.slice(0, 5)}` : ""}
             {" · "}잔여 {oneRemain ?? "-"}/{oneTotal ?? "-"}회
           </p>
 
