@@ -90,14 +90,12 @@ export default function AvailabilityTab() {
       .select("id, name")
       .order("name");
 
-    // 내 1:1 담당 학생 (enrollments.teacher_id = 나, 1:1 수업)
     const { data: enr } = await supabase
       .from("enrollments")
       .select("id, student_id, remaining_sessions, total_sessions, courses(title, type), student:student_id(name)")
       .eq("teacher_id", user.id);
     const ones = (enr ?? []).filter((e) => e.courses?.type === "oneonone");
 
-    // 내 수업 예약 (1:1 학생 + 단체반 둘 다)
     const { data: bk } = await supabase
       .from("lesson_bookings")
       .select("*, student:student_id(name), course:course_id(title), enrollment:enrollment_id(remaining_sessions, total_sessions), branch:branch_id(name)")
@@ -231,7 +229,7 @@ export default function AvailabilityTab() {
       return;
     }
 
-    // 1:1 예약이면 잔여 차감: DB에서 최신값 읽어서 -1
+    // ★ 1:1 예약이면 잔여 차감: DB에서 최신값 읽어서 -1
     if (lessonKind === "one" && payload.enrollment_id) {
       const { data: fresh } = await supabase
         .from("enrollments")
@@ -337,20 +335,17 @@ export default function AvailabilityTab() {
                 >
                   <span className={`text-xs font-bold ${wd === 0 ? "text-red-400" : wd === 6 ? "text-blue-400" : "text-slate-600"}`}>{d}</span>
                   <div className="mt-1 space-y-0.5">
-                    {/* 가능시간 (초록) */}
                     {daySlots.map((s) => (
                       <div key={s.id} className="truncate rounded bg-green-500/15 px-1 py-0.5 text-[9px] leading-tight text-green-700">
                         {s.start_time.slice(0, 5)}~{s.end_time.slice(0, 5)}
                         {s.branch?.name ? ` ${s.branch.name}` : ""}
                       </div>
                     ))}
-                    {/* 단체반 정규수업 (파랑, 요일 고정) */}
                     {dayCourses.map((c) => (
                       <div key={c.id} className="truncate rounded bg-seum-blue/15 px-1 py-0.5 text-[9px] leading-tight text-seum-blue">
                         {c.start_time?.slice(0, 5)} {c.title}
                       </div>
                     ))}
-                    {/* 예약된 수업 (파랑, 진하게) - 1:1 학생 또는 단체반 */}
                     {dayBookings.map((b) => (
                       <div key={b.id} className="truncate rounded bg-seum-blue/25 px-1 py-0.5 text-[9px] font-medium leading-tight text-seum-blue">
                         {b.start_time?.slice(0, 5)}{b.end_time ? `~${b.end_time.slice(0, 5)}` : ""} {b.student?.name ?? b.course?.title ?? "수업"}
@@ -371,7 +366,6 @@ export default function AvailabilityTab() {
               날짜를 선택하세요.
             </div>
           ) : tab === "avail" ? (
-            /* ===== 내 가능시간 탭 ===== */
             <div className="space-y-4">
               <div className="rounded-xl border border-slate-200 bg-white p-5">
                 <h4 className="mb-3 font-bold text-seum-navy">
@@ -426,14 +420,12 @@ export default function AvailabilityTab() {
               </div>
             </div>
           ) : (
-            /* ===== 수업 스케줄 탭 ===== */
             <div className="space-y-4">
               <div className="rounded-xl border border-slate-200 bg-white p-5">
                 <h4 className="mb-3 font-bold text-seum-navy">
                   {month + 1}월 {Number(selectedDate.slice(-2))}일 ({WEEKDAYS[new Date(selectedDate).getDay()]}) 수업 잡기
                 </h4>
 
-                {/* 1:1 / 단체반 선택 */}
                 <div className="mb-3 flex gap-2">
                   <button
                     onClick={() => setLessonKind("one")}
@@ -526,7 +518,6 @@ export default function AvailabilityTab() {
                 )}
               </div>
 
-              {/* 단체반 정규수업 (요일 고정, 참고 표시) */}
               {selectedCourses.length > 0 && (
                 <div className="rounded-xl border border-slate-200 bg-white p-5">
                   <h4 className="mb-2 font-bold text-seum-navy">이 요일 정규 단체반</h4>
