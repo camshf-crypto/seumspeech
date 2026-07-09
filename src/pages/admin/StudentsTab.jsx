@@ -313,12 +313,7 @@ export default function StudentsTab({ branchId }) {
         branch_id: branchId || null,
       });
       if (bkErr) { setAssigning(false); return alert("첫 수업 예약 실패: " + bkErr.message); }
-      // 잔여 1 차감
-      if (oneSessions > 0) {
-        await supabase.from("enrollments")
-          .update({ remaining_sessions: oneSessions - 1 })
-          .eq("id", newEnr.id);
-      }
+      // 잔여 차감은 DB 트리거가 자동 처리함
     }
 
     setAssigning(false);
@@ -350,37 +345,15 @@ export default function StudentsTab({ branchId }) {
       branch_id: branchId || null,
     });
     if (error) return alert("수업 예약 실패: " + error.message);
-    // 잔여 1 차감
-    if (enroll.remaining_sessions > 0) {
-      await supabase.from("enrollments")
-        .update({ remaining_sessions: enroll.remaining_sessions - 1 })
-        .eq("id", enroll.id);
-    }
+    // 잔여 차감은 DB 트리거가 자동 처리함
     setBookForm((p) => ({ ...p, [enroll.id]: { date: "", time: "14:00" } }));
     await refreshKeepOpen();
   };
 
   const removeBooking = async (id) => {
     if (!window.confirm("이 수업 예약을 삭제할까요?")) return;
-    // 삭제 전 정보 조회 후 잔여 복구
-    let target = null;
-    for (const key in bookingsMap) {
-      const found = (bookingsMap[key] ?? []).find((b) => b.id === id);
-      if (found) { target = found; break; }
-    }
+    // 잔여 복구는 DB 트리거가 자동 처리함
     await supabase.from("lesson_bookings").delete().eq("id", id);
-    if (target && target.enrollment_id) {
-      const { data: enr } = await supabase
-        .from("enrollments")
-        .select("remaining_sessions, total_sessions")
-        .eq("id", target.enrollment_id)
-        .single();
-      if (enr && enr.remaining_sessions < enr.total_sessions) {
-        await supabase.from("enrollments")
-          .update({ remaining_sessions: enr.remaining_sessions + 1 })
-          .eq("id", target.enrollment_id);
-      }
-    }
     await refreshKeepOpen();
   };
 
