@@ -14,6 +14,7 @@ import ContentTab from "./ContentTab";
 import TeacherProfileTab from "./TeacherProfileTab";
 import StudentMaterialsView from "../../components/StudentMaterialsView";
 import ApprovalTab from "./ApprovalTab";
+import PushNotificationButton from "./PushNotificationButton";
 
 const MENUS = [
   { key: "dashboard", label: "대시보드" },
@@ -215,12 +216,15 @@ export default function AdminLayout() {
                 </p>
               </div>
             </div>
-            <button
-              onClick={() => (window.location.href = "/home")}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 md:hidden"
-            >
-              홈
-            </button>
+            <div className="flex items-center gap-2">
+              <PushNotificationButton userId={profile?.id} />
+              <button
+                onClick={() => (window.location.href = "/home")}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 md:hidden"
+              >
+                홈
+              </button>
+            </div>
           </div>
 
           {needsBranch ? (

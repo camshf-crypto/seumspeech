@@ -172,6 +172,19 @@ export default function InquiryChatWidget({ open, onClose }) {
     setMessages(msg ? [msg] : []);
     setStep("chat");
     setStarting(false);
+
+    // 원장/스태프에게 푸시 알림 발송 (실패해도 상담엔 지장 없게)
+    try {
+      supabase.functions.invoke("send-push", {
+        body: {
+          title: "세움스피치 새 상담",
+          body: `${nickname.trim()}님 (${CATEGORIES.find((c) => c.key === category)?.label ?? category}) 상담 문의`,
+          url: "/admin",
+        },
+      });
+    } catch (e) {
+      // 알림 실패는 무시
+    }
   };
 
   const send = async () => {
