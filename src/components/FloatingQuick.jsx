@@ -53,13 +53,20 @@ export default function FloatingQuick() {
               </span>
             </button>
 
-            {/* 1:1 문의 (사이트 내 채팅 위젯 열기) */}
+            {/* 대화 시작하기 (사이트 내 채팅 위젯 열기) */}
             <button
               onClick={() => setInquiryOpen(true)}
-              className="flex flex-col items-center justify-center gap-2 border-t border-slate-200 bg-seum-blue py-5 text-white hover:bg-[#2a63c4]"
+              className="flex flex-col items-center justify-center gap-1.5 border-t border-slate-200 bg-seum-blue py-5 text-white hover:bg-[#2a63c4]"
             >
-              <Ico.chat className="h-7 w-7" />
-              <span className="text-[12px] font-bold leading-tight text-center">1:1 문의</span>
+              {/* 헤드셋 아이콘 */}
+              <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none">
+                <path d="M4 13v-1a8 8 0 0116 0v1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                <rect x="2.5" y="13" width="4" height="6" rx="2" fill="currentColor" />
+                <rect x="17.5" y="13" width="4" height="6" rx="2" fill="currentColor" />
+                <path d="M20 19v1a3 3 0 01-3 3h-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                <circle cx="12" cy="23" r="1.3" fill="currentColor" />
+              </svg>
+              <span className="text-[12px] font-bold leading-tight text-center">대화<br />시작하기</span>
             </button>
 
             {/* 상담 및 문의 (클릭 시 /consult 이동) */}
@@ -82,7 +89,7 @@ export default function FloatingQuick() {
         )}
       </div>
 
-      {/* 1:1 문의 채팅 위젯 */}
+      {/* 대화 시작하기 채팅 위젯 */}
       <InquiryChatWidget open={inquiryOpen} onClose={() => setInquiryOpen(false)} />
     </>
   );
