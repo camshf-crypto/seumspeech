@@ -56,7 +56,7 @@ export default function FloatingQuick() {
             {/* 대화 시작하기 (사이트 내 채팅 위젯 열기) */}
             <button
               onClick={() => setInquiryOpen(true)}
-              className="flex flex-col items-center justify-center gap-1.5 border-t border-slate-200 bg-seum-blue py-5 text-white hover:bg-[#2a63c4]"
+              className="flex flex-col items-center justify-center gap-1.5 border-t border-slate-200 bg-[#FEE500] py-5 text-seum-navy hover:brightness-95"
             >
               {/* 헤드셋 아이콘 */}
               <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none">
