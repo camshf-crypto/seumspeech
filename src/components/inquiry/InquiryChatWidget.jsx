@@ -21,6 +21,40 @@ export default function InquiryChatWidget({ open, onClose }) {
   const bottomRef = useRef(null);
   const startedRef = useRef(false);
 
+  // 모바일 키보드 대응 (사파리/크롬/네이버앱/카톡 인앱 브라우저 전부 커버)
+  // visualViewport로 실제 보이는 높이와 위치를 추적. 없으면 window.innerHeight fallback.
+  const [vp, setVp] = useState({ height: null, offsetTop: 0 });
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+
+    const vv = window.visualViewport;
+    const update = () => {
+      if (vv) {
+        setVp({ height: vv.height, offsetTop: vv.offsetTop || 0 });
+      } else {
+        // 인앱 브라우저 중 visualViewport 없는 구형 대비
+        setVp({ height: window.innerHeight, offsetTop: 0 });
+      }
+    };
+    update();
+
+    if (vv) {
+      vv.addEventListener("resize", update);
+      vv.addEventListener("scroll", update);
+    }
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+
+    return () => {
+      if (vv) {
+        vv.removeEventListener("resize", update);
+        vv.removeEventListener("scroll", update);
+      }
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, [open]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, infoRequested, infoSubmitted]);
@@ -187,9 +221,15 @@ export default function InquiryChatWidget({ open, onClose }) {
 
   if (!open) return null;
 
+  // 데스크탑(sm 이상 640px)에선 인라인 높이/위치 스타일 안 줌 (CSS 클래스로 처리)
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 640;
+  const mobileStyle = isMobile
+    ? (vp.height ? { height: `${vp.height}px`, top: `${vp.offsetTop}px` } : { height: "100dvh", top: 0 })
+    : {};
+
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-white sm:inset-auto sm:bottom-4 sm:right-4 sm:h-[560px] sm:max-h-[85vh] sm:w-[360px] sm:max-w-[calc(100vw-2rem)] sm:overflow-hidden sm:rounded-2xl sm:shadow-2xl"
-      style={{ height: "100dvh" }}>
+    <div className="fixed inset-x-0 z-[70] flex flex-col bg-white sm:inset-auto sm:bottom-4 sm:right-4 sm:top-auto sm:h-[560px] sm:max-h-[85vh] sm:w-[360px] sm:max-w-[calc(100vw-2rem)] sm:overflow-hidden sm:rounded-2xl sm:shadow-2xl"
+      style={mobileStyle}>
       {/* 헤더 */}
       <div className="flex flex-shrink-0 items-center justify-between bg-seum-navy px-4 py-3 text-white">
         <div>
@@ -252,6 +292,7 @@ export default function InquiryChatWidget({ open, onClose }) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
+          onFocus={() => setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 300)}
           rows={1}
           placeholder="메시지를 입력하세요..."
           disabled={!inquiryId}
