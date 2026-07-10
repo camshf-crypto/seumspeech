@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
       title: title || "세움스피치 새 상담",
       body: body || "새로운 1:1 문의가 도착했습니다.",
       url: url || "/admin",
-      tag: "seum-inquiry",
+      tag: "seum-" + Date.now(),
     });
 
     const results = await Promise.allSettled(

@@ -13,7 +13,8 @@ self.addEventListener("push", (event) => {
     body: data.body || "새로운 상담 문의가 있습니다.",
     icon: "/pwa-192x192.png",
     badge: "/pwa-192x192.png",
-    tag: data.tag || "seum-inquiry",
+    tag: data.tag || ("seum-" + Date.now()),
+    renotify: true,
     data: { url: data.url || "/admin" },
     vibrate: [200, 100, 200],
   };
