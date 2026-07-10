@@ -177,15 +177,16 @@ export default function InquiryAdminTab() {
     setSendingMemo(true);
 
     // 개인정보는 메모에 함께 저장 (DB에서 직접 - AI 안 거침)
-    const who = selected.info_submitted ? selected.visitor_name : "방문자";
+    const who = selected.nickname || selected.visitor_name || "방문자";
+    const cat = selected.category ? ` [${selected.category}]` : "";
     const contact = selected.info_submitted
       ? `\n\n[연락처] ${selected.visitor_phone ?? "-"}${selected.visitor_email ? ` / ${selected.visitor_email}` : ""}`
-      : "";
+      : (selected.phone_last4 ? `\n\n[식별] 닉네임 ${who} / 번호뒷자리 ${selected.phone_last4}` : "");
     const memoContent = summary + contact;
 
     const { error } = await supabase.from("teacher_memos").insert({
       teacher_id: sendToTeacher,
-      title: `홈페이지 상담 요약 - ${who}`,
+      title: `홈페이지 상담${cat} - ${who}`,
       content: memoContent,
       source: "inquiry",
       inquiry_id: selected.id,
@@ -239,16 +240,18 @@ export default function InquiryAdminTab() {
                     className={`w-full rounded-xl border p-3 text-left transition ${isSel ? "border-seum-blue bg-blue-50" : "border-slate-200 hover:bg-slate-50"}`}>
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-seum-navy">
-                        {q.info_submitted ? q.visitor_name : "방문자"}
+                        {q.nickname || q.visitor_name || "방문자"}
+                        {q.phone_last4 ? <span className="ml-1 text-xs font-normal text-slate-400">#{q.phone_last4}</span> : null}
                         {q.status === "closed" ? <span className="ml-1 text-[10px] text-slate-400">(종료)</span> : null}
                       </span>
                       <span className="text-[11px] text-slate-400">{fmtTime(q.updated_at)}</span>
                     </div>
+                    {q.category ? (
+                      <span className="mt-1 inline-block rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-seum-blue">{q.category}</span>
+                    ) : null}
                     {q.info_submitted && q.visitor_phone ? (
                       <p className="mt-0.5 text-xs text-slate-500">{q.visitor_phone}</p>
-                    ) : (
-                      <p className="mt-0.5 text-[11px] text-amber-500">정보 미입력</p>
-                    )}
+                    ) : null}
                   </button>
                 );
               })}
@@ -266,19 +269,21 @@ export default function InquiryAdminTab() {
             <div className="space-y-3">
               <div className="flex h-[50vh] flex-col overflow-hidden rounded-xl border border-slate-200">
                 {/* 방문자 정보 헤더 */}
-                <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+                <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-2.5">
                   <div className="text-sm">
                     <span className="font-bold text-seum-navy">
-                      {selected.info_submitted ? selected.visitor_name : "방문자"}
+                      {selected.nickname || selected.visitor_name || "방문자"}
+                      {selected.phone_last4 ? <span className="ml-1 text-xs font-normal text-slate-400">#{selected.phone_last4}</span> : null}
                     </span>
+                    {selected.category ? (
+                      <span className="ml-1.5 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-seum-blue">{selected.category}</span>
+                    ) : null}
                     {selected.info_submitted ? (
                       <span className="ml-2 text-xs text-slate-500">
                         {selected.visitor_phone}
                         {selected.visitor_email ? ` · ${selected.visitor_email}` : ""}
                       </span>
-                    ) : (
-                      <span className="ml-2 text-xs text-amber-500">정보 미입력</span>
-                    )}
+                    ) : null}
                   </div>
                   <div className="flex gap-1.5">
                     {!selected.info_submitted ? (
@@ -297,7 +302,7 @@ export default function InquiryAdminTab() {
                 </div>
 
                 {/* 메시지 */}
-                <div className="flex-1 space-y-2 overflow-y-auto bg-slate-50 p-3">
+                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-slate-50 p-3">
                   {messages.map((m) => {
                     const staff = m.sender === "staff";
                     return (
@@ -315,7 +320,7 @@ export default function InquiryAdminTab() {
 
                 {/* 입력 */}
                 {selected.status !== "closed" ? (
-                  <div className="flex items-end gap-2 border-t border-slate-200 p-2">
+                  <div className="flex flex-shrink-0 items-end gap-2 border-t border-slate-200 bg-white p-2">
                     <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown} rows={1}
                       placeholder="답변을 입력하세요..."
                       className="max-h-24 flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
