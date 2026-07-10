@@ -188,9 +188,10 @@ export default function InquiryChatWidget({ open, onClose }) {
   if (!open) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-[70] flex h-[560px] max-h-[85vh] w-[360px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+    <div className="fixed inset-0 z-[70] flex flex-col bg-white sm:inset-auto sm:bottom-4 sm:right-4 sm:h-[560px] sm:max-h-[85vh] sm:w-[360px] sm:max-w-[calc(100vw-2rem)] sm:overflow-hidden sm:rounded-2xl sm:shadow-2xl"
+      style={{ height: "100dvh" }}>
       {/* 헤더 */}
-      <div className="flex items-center justify-between bg-seum-navy px-4 py-3 text-white">
+      <div className="flex flex-shrink-0 items-center justify-between bg-seum-navy px-4 py-3 text-white">
         <div>
           <p className="text-sm font-bold">세움스피치 1:1 문의</p>
           <p className="text-[11px] text-white/70">보통 몇 분 내 답변드려요</p>
@@ -199,7 +200,7 @@ export default function InquiryChatWidget({ open, onClose }) {
       </div>
 
       {/* 채팅 */}
-      <div className="flex-1 space-y-2 overflow-y-auto bg-slate-50 p-3">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-slate-50 p-3">
         {starting && messages.length === 0 ? (
           <p className="py-6 text-center text-sm text-slate-400">연결 중...</p>
         ) : null}
@@ -246,7 +247,7 @@ export default function InquiryChatWidget({ open, onClose }) {
       </div>
 
       {/* 입력 */}
-      <div className="flex items-end gap-2 border-t border-slate-200 p-2">
+      <div className="flex flex-shrink-0 items-end gap-2 border-t border-slate-200 bg-white p-2">
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
