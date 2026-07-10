@@ -201,6 +201,20 @@ export default function InquiryChatWidget({ open, onClose }) {
     setSending(false);
     if (error) return alert("전송 실패: " + error.message);
     setMessages((prev) => (prev.some((x) => x.id === msg.id) ? prev : [...prev, msg]));
+
+    // 방문자가 메시지 보낼 때마다 원장에게 푸시 (실패해도 무시)
+    try {
+      const who = nickname.trim() || "방문자";
+      supabase.functions.invoke("send-push", {
+        body: {
+          title: `${who}님 메시지`,
+          body: text.length > 40 ? text.slice(0, 40) + "..." : text,
+          url: "/admin",
+        },
+      });
+    } catch (e) {
+      // 알림 실패 무시
+    }
   };
 
   const submitInfo = async () => {
