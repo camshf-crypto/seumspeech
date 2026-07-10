@@ -15,7 +15,7 @@ export default function FloatingQuick() {
 
   return (
     <>
-      <div className="fixed right-0 top-1/3 z-50 flex -translate-y-1/2">
+      <div className="fixed right-0 top-1/2 z-50 flex -translate-y-1/2">
         {open ? (
           <div className="flex w-24 flex-col items-stretch overflow-hidden rounded-l-xl border-l border-y border-slate-200 bg-white text-seum-navy shadow-2xl">
             {/* 접기 버튼 */}
