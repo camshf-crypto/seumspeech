@@ -245,7 +245,7 @@ function FeedbackAccordion({ grades, text }) {
                 </span>
               )}
               <span className="truncate text-[11px] font-medium text-slate-400">
-                인재상 진단 · 개선 포인트 · 모범 답변
+                인재상 진단 · 개선 포인트
               </span>
             </>
           )}
@@ -300,10 +300,9 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const [savingId, setSavingId] = useState(null);
   const [loadingQ, setLoadingQ] = useState(false);
 
-  // 자동 저장 / 전달 완료 상태
+  // 자동 저장 상태 (임시 저장 — 선생님에게 전달되지 않음)
   const [autoSavingIds, setAutoSavingIds] = useState({}); // { [questionId]: true }
   const [autoSavedIds, setAutoSavedIds] = useState({});   // { [questionId]: true }
-  const [submittedIds, setSubmittedIds] = useState({});   // { [questionId]: true }
   const questionsRef = useRef(questions);
   questionsRef.current = questions;
 
@@ -433,15 +432,23 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     return () => { supabase.removeChannel(channel); };
   }, [studentId]);
 
-  // 실제 저장 (수동 / 자동 공용)
-  const persistAnswer = async (questionId, text) => {
+  // 실제 저장
+  // submit=false → 임시 저장(자동 저장). 선생님에게 전달되지 않음
+  // submit=true  → 제출. submitted_at 기록되어 선생님 화면에 노출
+  const persistAnswer = async (questionId, text, submit = false) => {
     const now = new Date().toISOString();
+    const payload = {
+      question_id: questionId,
+      student_id: studentId,
+      student_answer: text,
+      answered_at: now,
+      updated_at: now,
+    };
+    if (submit) payload.submitted_at = now;
+
     const { data, error } = await supabase
       .from("interview_answers_v2")
-      .upsert(
-        { question_id: questionId, student_id: studentId, student_answer: text, answered_at: now, updated_at: now },
-        { onConflict: "question_id,student_id" }
-      )
+      .upsert(payload, { onConflict: "question_id,student_id" })
       .select()
       .maybeSingle();
     if (error) throw error;
@@ -451,7 +458,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     return data;
   };
 
-  // 4) 자동 저장 — 입력이 멈추고 1.5초 뒤, 변경된 답변만
+  // 4) 자동 저장(임시 저장) — 입력이 멈추고 1.5초 뒤, 변경된 답변만
   useEffect(() => {
     if (locked) return;
     const timer = setTimeout(async () => {
@@ -465,7 +472,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       for (const q of targets) {
         setAutoSavingIds((p) => ({ ...p, [q.id]: true }));
         try {
-          await persistAnswer(q.id, answers[q.id] ?? "");
+          await persistAnswer(q.id, answers[q.id] ?? "", false);
           setAutoSavedIds((p) => ({ ...p, [q.id]: true }));
           setTimeout(() => {
             setAutoSavedIds((p) => {
@@ -490,6 +497,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     // eslint-disable-next-line
   }, [answers, locked, studentId]);
 
+  // 저장 버튼 = 선생님에게 제출
   const saveAnswer = async (q) => {
     if (locked) return alert("수강이 종료되어 답변을 저장할 수 없습니다. 재등록 후 이용해주세요.");
     const text = (answers[q.id] ?? "").trim();
@@ -497,15 +505,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
     setSavingId(q.id);
     try {
-      await persistAnswer(q.id, answers[q.id] ?? "");
-      setSubmittedIds((p) => ({ ...p, [q.id]: true }));
-      setTimeout(() => {
-        setSubmittedIds((p) => {
-          const next = { ...p };
-          delete next[q.id];
-          return next;
-        });
-      }, 3000);
+      await persistAnswer(q.id, answers[q.id] ?? "", true);
     } catch (e) {
       alert("저장 실패: " + e.message);
     } finally {
@@ -541,7 +541,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
           {subLabel && <span className="ml-2 text-seum-blue">· {subLabel}</span>} 면접
         </h2>
         <p className="text-sm text-slate-400">
-          답변은 작성 중 자동 저장됩니다. 작성이 끝나면 저장 버튼을 눌러 선생님께 전달하세요.
+          작성 중인 내용은 자동 저장됩니다. 저장 버튼을 눌러야 선생님께 전달됩니다.
         </p>
       </div>
 
@@ -613,13 +613,17 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
             const grades = fb ? parseGrades(fb) : null;
             // 차트가 있으면 진단 블록은 텍스트에서 제거
             const fbText = grades ? stripDiagnosis(fb) : fb;
-            const dirty = (answers[q.id] ?? "") !== (a?.student_answer ?? "");
-            const submitted = !!submittedIds[q.id];
+
+            const text = answers[q.id] ?? "";
+            const dirty = text !== (a?.student_answer ?? "");
+            // 제출 완료 = submitted_at 있고, 그 이후로 내용을 바꾸지 않음
+            const submitted = !!a?.submitted_at && !dirty && !!text.trim();
+
             return (
               <div
                 key={q.id}
                 className={`rounded-xl border bg-white p-4 transition ${
-                  submitted ? "border-green-300 bg-green-50/40" : "border-slate-200"
+                  submitted ? "border-green-200" : "border-slate-200"
                 }`}
               >
                 <p className="mb-2 font-medium text-seum-navy">
@@ -627,44 +631,50 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                   {q.question}
                 </p>
                 <textarea
-                  value={answers[q.id] ?? ""}
+                  value={text}
                   onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
                   rows={4}
                   disabled={locked}
                   placeholder={locked ? "수강 종료로 답변을 작성할 수 없습니다." : "답변을 작성하세요. 자동 저장됩니다."}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue disabled:bg-slate-50 disabled:text-slate-400"
                 />
-                <div className="mt-2 flex items-center justify-between">
+                <div className="mt-2 flex items-center justify-between gap-2">
                   {submitted ? (
-                    <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-bold text-green-700">
-                      ✓ 선생님께 전달되었습니다
-                    </span>
+                    <span className="text-xs font-bold text-green-600">✓ 선생님께 전달됨</span>
                   ) : autoSavingIds[q.id] ? (
                     <span className="text-xs text-slate-400">저장 중...</span>
                   ) : autoSavedIds[q.id] ? (
-                    <span className="text-xs text-blue-600">자동 저장됨</span>
-                  ) : dirty ? (
-                    <span className="text-xs text-amber-500">작성 중</span>
-                  ) : a?.answered_at ? (
-                    <span className="text-xs text-green-600">✓ 저장됨</span>
+                    <span className="text-xs text-blue-600">임시 저장됨 — 저장을 눌러 전달하세요</span>
+                  ) : text.trim() ? (
+                    <span className="text-xs text-amber-500">
+                      {a?.submitted_at ? "수정됨 — 다시 전달하세요" : "저장을 눌러 선생님께 전달하세요"}
+                    </span>
                   ) : (
                     <span className="text-xs text-slate-400">미작성</span>
                   )}
                   <button
                     type="button"
                     onClick={() => saveAnswer(q)}
-                    disabled={savingId === q.id || locked}
-                    className={`rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-50 ${
-                      submitted ? "bg-green-600" : "bg-seum-blue hover:bg-[#2a63c4]"
+                    disabled={savingId === q.id || locked || submitted}
+                    className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
+                      submitted
+                        ? "cursor-default bg-green-600"
+                        : "bg-seum-blue hover:bg-[#2a63c4]"
                     }`}
                   >
-                    {savingId === q.id ? "저장 중..." : submitted ? "✓ 전달 완료" : "저장"}
+                    {savingId === q.id
+                      ? "저장 중..."
+                      : submitted
+                      ? "✓ 전달 완료"
+                      : a?.submitted_at
+                      ? "다시 전달"
+                      : "저장"}
                   </button>
                 </div>
 
                 {fb ? (
                   <FeedbackAccordion grades={grades} text={fbText} />
-                ) : a?.answered_at ? (
+                ) : submitted ? (
                   <p className="mt-3 text-xs text-slate-400">선생님 피드백을 기다리는 중이에요.</p>
                 ) : null}
               </div>

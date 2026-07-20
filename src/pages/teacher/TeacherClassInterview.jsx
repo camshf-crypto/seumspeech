@@ -5,7 +5,6 @@ import {
   getSubLabel,
   getCategoryLabel,
   getTabLabel,
-  getSeries,
 } from "../../lib/interviewConfig";
 
 // ============================================================
@@ -42,28 +41,42 @@ async function extractFnError(error) {
   return detail;
 }
 
-// 선생님 단체반 모드: 반 선택 → 반 배정 카테고리 → 탭 → 질문마다 반 학생 전원 답변 → 전체 AI
+const fmtTime = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
+// ============================================================
+// 선생님 단체반 모드
+// 반 선택 → 학생 선택 → 탭 → 그 학생의 질문/답변/피드백
+// 학생이 저장(제출)한 답변만 피드백 대상으로 노출
+// 기출문제는 학생마다 직렬이 다르므로 "제출한 것만" 표시
+// ============================================================
 export default function TeacherClassInterview() {
   const [classes, setClasses] = useState([]); // [{course, assignment}]
   const [classesLoading, setClassesLoading] = useState(true);
 
-  const [selClass, setSelClass] = useState(null); // { course, assignment }
-  const [students, setStudents] = useState([]);   // 반 학생 [{id, name}]
+  const [selClass, setSelClass] = useState(null);     // { course, assignment }
+  const [students, setStudents] = useState([]);       // 반 학생 [{id, name}]
+  const [selStudent, setSelStudent] = useState(null); // { id, name }
   const [activeTab, setActiveTab] = useState(null);
-  const [activeSeries, setActiveSeries] = useState(null); // 기출문제 직렬
-  const [questions, setQuestions] = useState([]); // 이 탭 질문들
-  const [answersByQ, setAnswersByQ] = useState({}); // { [questionId]: { [studentId]: answerRow } }
+
+  const [rows, setRows] = useState([]);   // [{ ...question, _answer }]
   const [loading, setLoading] = useState(false);
 
   const [draftEdits, setDraftEdits] = useState({}); // { [answerId]: text }
   const [savingId, setSavingId] = useState(null);
   const [aiLoadingId, setAiLoadingId] = useState(null);
 
-  // 전체 AI 진행 상태
+  // 탭별 답변 현황 (학생 선택 시 계산)
+  const [tabStats, setTabStats] = useState({}); // { [tabKey]: { answered, feedbacked } }
+
+  // 일괄 AI 진행 상태
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
 
-  // 1) 면접 단체반 로드 (courses.course_kind='interview')
+  // 1) 면접 단체반 로드
   useEffect(() => {
     (async () => {
       setClassesLoading(true);
@@ -84,7 +97,6 @@ export default function TeacherClassInterview() {
           assignment: { category_key: c.interview_category, sub_key: c.interview_sub },
         }));
 
-      // 담당 선생님 지정된 반이 있으면 내 것만, 아니면 전체
       if (myId) {
         const mine = list.filter((c) => c.course.teacher_id === myId);
         if (mine.length > 0) list = mine;
@@ -95,10 +107,16 @@ export default function TeacherClassInterview() {
     })();
   }, []);
 
-  // 2) 반 선택 시: 반 학생 목록 로드
+  // 2) 반 선택 → 학생 목록
   useEffect(() => {
-    if (!selClass) { setStudents([]); setActiveTab(null); setQuestions([]); setAnswersByQ({}); return; }
+    if (!selClass) {
+      setStudents([]); setSelStudent(null); setActiveTab(null);
+      setRows([]); setTabStats({});
+      return;
+    }
     (async () => {
+      setSelStudent(null);
+      setRows([]);
       const cat = getCategory(selClass.assignment.category_key);
       setActiveTab(cat?.tabs?.[0]?.key ?? null);
 
@@ -115,23 +133,50 @@ export default function TeacherClassInterview() {
     })();
   }, [selClass]);
 
-  // 3) 탭 로드: 질문 + 학생별 답변
+  // 3) 학생 선택 → 탭별 현황 집계 (제출된 답변 기준)
+  useEffect(() => {
+    if (!selClass || !selStudent) { setTabStats({}); return; }
+    (async () => {
+      const { category_key, sub_key } = selClass.assignment;
+
+      let q = supabase
+        .from("interview_questions_v2")
+        .select("id, tab_key")
+        .eq("category_key", category_key)
+        .eq("is_active", true);
+      q = sub_key ? q.eq("sub_key", sub_key) : q.is("sub_key", null);
+      const { data: qs } = await q;
+
+      const tabOf = {};
+      (qs ?? []).forEach((x) => { tabOf[x.id] = x.tab_key; });
+      const ids = Object.keys(tabOf);
+      if (ids.length === 0) { setTabStats({}); return; }
+
+      const { data: ans } = await supabase
+        .from("interview_answers_v2")
+        .select("question_id, student_answer, teacher_feedback, submitted_at")
+        .eq("student_id", selStudent.id)
+        .in("question_id", ids);
+
+      const stats = {};
+      (ans ?? []).forEach((a) => {
+        const tk = tabOf[a.question_id];
+        if (!tk) return;
+        // 제출된 답변만 집계
+        if (!a.submitted_at || !a.student_answer?.trim()) return;
+        stats[tk] = stats[tk] || { answered: 0, feedbacked: 0 };
+        stats[tk].answered++;
+        if (a.teacher_feedback) stats[tk].feedbacked++;
+      });
+      setTabStats(stats);
+    })();
+  }, [selClass, selStudent]);
+
+  // 4) 탭 로드 — 선택 학생 기준
   const loadTab = async () => {
-    if (!selClass || !activeTab || students.length === 0) return;
-    const { category_key, sub_key } = selClass.assignment;
-
-    const seriesList = getSeries(category_key, sub_key);
-    const needsSeries = activeTab === "gichul" && seriesList.length > 0;
-
-    // 직렬 선택이 필요한데 아직 안 골랐으면 비워둠
-    if (needsSeries && !activeSeries) {
-      setQuestions([]);
-      setAnswersByQ({});
-      setDraftEdits({});
-      return;
-    }
-
+    if (!selClass || !selStudent || !activeTab) { setRows([]); return; }
     setLoading(true);
+    const { category_key, sub_key } = selClass.assignment;
 
     let q = supabase
       .from("interview_questions_v2")
@@ -141,41 +186,50 @@ export default function TeacherClassInterview() {
       .eq("is_active", true)
       .order("seq");
     q = sub_key ? q.eq("sub_key", sub_key) : q.is("sub_key", null);
-    if (needsSeries) q = q.eq("series_key", activeSeries);
 
     const { data: qs } = await q;
     const questionList = qs ?? [];
-    const qIds = questionList.map((x) => x.id);
-    const sIds = students.map((s) => s.id);
+    const ids = questionList.map((x) => x.id);
 
-    let ansMap = {}; // questionId -> studentId -> row
+    let ansMap = {};
     const edits = {};
-    if (qIds.length > 0 && sIds.length > 0) {
+    if (ids.length > 0) {
       const { data: ans } = await supabase
         .from("interview_answers_v2")
         .select("*")
-        .in("question_id", qIds)
-        .in("student_id", sIds);
+        .eq("student_id", selStudent.id)
+        .in("question_id", ids);
       (ans ?? []).forEach((a) => {
-        (ansMap[a.question_id] = ansMap[a.question_id] || {})[a.student_id] = a;
+        ansMap[a.question_id] = a;
         edits[a.id] = a.teacher_feedback ?? a.ai_draft ?? "";
       });
     }
 
-    setQuestions(questionList);
-    setAnswersByQ(ansMap);
+    let merged = questionList.map((qq) => ({ ...qq, _answer: ansMap[qq.id] || null }));
+
+    // 학생이 저장(제출)하지 않은 임시 답변은 선생님에게 노출하지 않음
+    merged = merged.map((r) => {
+      if (r._answer && !r._answer.submitted_at) {
+        return { ...r, _answer: { ...r._answer, student_answer: null } };
+      }
+      return r;
+    });
+
+    // 기출문제는 학생마다 직렬이 다르므로, 제출한 것만 표시
+    if (activeTab === "gichul") {
+      merged = merged.filter((r) => r._answer?.student_answer?.trim());
+    }
+
+    setRows(merged);
     setDraftEdits(edits);
     setLoading(false);
   };
 
   useEffect(() => { loadTab(); /* eslint-disable-next-line */ },
-    [selClass, activeTab, activeSeries, students]);
+    [selClass, selStudent, activeTab]);
 
-  // 탭이 바뀌면 직렬 선택 초기화
-  useEffect(() => { setActiveSeries(null); }, [activeTab]);
-
-  // AI 초안 1건 (카테고리별 Edge Function 호출)
-  const genOne = async (qRow, studentId, answerRow) => {
+  // AI 초안 1건
+  const genOne = async (qRow, answerRow) => {
     if (!answerRow?.student_answer) return null;
     const { category_key, sub_key } = selClass.assignment;
     const fnName = getFnName(category_key);
@@ -187,7 +241,7 @@ export default function TeacherClassInterview() {
         sub_key: sub_key,
         tab: getTabLabel(category_key, activeTab),
         tab_key: activeTab,
-        series_key: activeSeries,
+        series_key: qRow.series_key ?? null,
         question: qRow.question,
         answer: answerRow.student_answer,
       },
@@ -210,17 +264,15 @@ export default function TeacherClassInterview() {
     return draft;
   };
 
-  const genSingle = async (qRow, studentId) => {
-    const a = answersByQ[qRow.id]?.[studentId];
+  const genSingle = async (qRow) => {
+    const a = qRow._answer;
     if (!a?.student_answer) return alert("학생 답변이 없습니다.");
     setAiLoadingId(a.id);
     try {
-      const draft = await genOne(qRow, studentId, a);
-      setAnswersByQ((prev) => {
-        const next = { ...prev };
-        next[qRow.id] = { ...next[qRow.id], [studentId]: { ...a, ai_draft: draft } };
-        return next;
-      });
+      const draft = await genOne(qRow, a);
+      setRows((prev) =>
+        prev.map((r) => (r.id === qRow.id ? { ...r, _answer: { ...r._answer, ai_draft: draft } } : r))
+      );
       setDraftEdits((prev) => ({ ...prev, [a.id]: draft }));
     } catch (e) {
       alert("AI 오류:\n\n" + e.message);
@@ -229,18 +281,16 @@ export default function TeacherClassInterview() {
     }
   };
 
-  // 전체 AI 초안 — 이 탭의 답변 있는 것 전부 (아직 확정 안 된 것만)
-  const genAll = async () => {
-    // 대상 수집
-    const targets = [];
-    questions.forEach((qRow) => {
-      students.forEach((s) => {
-        const a = answersByQ[qRow.id]?.[s.id];
-        if (a?.student_answer && !a.teacher_feedback) targets.push({ qRow, studentId: s.id, a });
-      });
-    });
+  // 이 학생 · 이 탭의 미확정 답변 전부
+  const genAllForStudent = async () => {
+    const targets = rows.filter(
+      (r) => r._answer?.student_answer?.trim() && !r._answer.teacher_feedback
+    );
     if (targets.length === 0) return alert("AI 초안을 생성할 답변이 없습니다. (이미 확정된 것은 제외)");
-    if (!window.confirm(`${targets.length}개 답변에 AI 초안을 생성합니다. 계속할까요?`)) return;
+    if (!window.confirm(
+      `${selStudent.name} 학생의 ${getTabLabel(selClass.assignment.category_key, activeTab)} ${targets.length}건에 AI 초안을 생성합니다.\n` +
+      `1건당 10~20초 걸리며, 이 화면을 닫으면 중단됩니다. 계속할까요?`
+    )) return;
 
     setBulkRunning(true);
     setBulkProgress({ done: 0, total: targets.length });
@@ -249,14 +299,13 @@ export default function TeacherClassInterview() {
     let failCount = 0;
 
     for (let i = 0; i < targets.length; i++) {
-      const { qRow, studentId, a } = targets[i];
+      const qRow = targets[i];
+      const a = qRow._answer;
       try {
-        const draft = await genOne(qRow, studentId, a);
-        setAnswersByQ((prev) => {
-          const next = { ...prev };
-          next[qRow.id] = { ...next[qRow.id], [studentId]: { ...next[qRow.id][studentId], ai_draft: draft } };
-          return next;
-        });
+        const draft = await genOne(qRow, a);
+        setRows((prev) =>
+          prev.map((r) => (r.id === qRow.id ? { ...r, _answer: { ...r._answer, ai_draft: draft } } : r))
+        );
         setDraftEdits((prev) => ({ ...prev, [a.id]: draft }));
       } catch (e) {
         console.error("AI 실패:", e.message);
@@ -270,13 +319,13 @@ export default function TeacherClassInterview() {
     if (failCount > 0) {
       alert(`${targets.length}건 중 ${failCount}건 실패했습니다.\n\n첫 에러:\n${firstError}`);
     } else {
-      alert("전체 AI 초안 생성 완료! 각 답변을 검토하고 확정하세요.");
+      alert("AI 초안 생성 완료! 각 답변을 검토하고 확정하세요.");
     }
   };
 
   // 피드백 확정 1건
-  const confirmOne = async (qRow, studentId) => {
-    const a = answersByQ[qRow.id]?.[studentId];
+  const confirmOne = async (qRow) => {
+    const a = qRow._answer;
     if (!a) return;
     const text = (draftEdits[a.id] ?? "").trim();
     if (!text) return alert("피드백 내용을 입력하세요.");
@@ -290,19 +339,24 @@ export default function TeacherClassInterview() {
       .maybeSingle();
     setSavingId(null);
     if (error) return alert("저장 실패: " + error.message);
-    setAnswersByQ((prev) => {
-      const next = { ...prev };
-      next[qRow.id] = { ...next[qRow.id], [studentId]: { ...a, ...data } };
-      return next;
-    });
+
+    const wasNew = !a.teacher_feedback;
+    setRows((prev) =>
+      prev.map((r) => (r.id === qRow.id ? { ...r, _answer: { ...r._answer, ...data } } : r))
+    );
+    if (wasNew) {
+      setTabStats((prev) => {
+        const cur = prev[activeTab] || { answered: 0, feedbacked: 0 };
+        return { ...prev, [activeTab]: { ...cur, feedbacked: cur.feedbacked + 1 } };
+      });
+    }
   };
 
   const cat = selClass ? getCategory(selClass.assignment.category_key) : null;
   const tabs = cat?.tabs ?? [];
-  const seriesList = selClass
-    ? getSeries(selClass.assignment.category_key, selClass.assignment.sub_key)
-    : [];
-  const showSeriesPicker = activeTab === "gichul" && seriesList.length > 0;
+  const pendingCount = rows.filter(
+    (r) => r._answer?.student_answer?.trim() && !r._answer.teacher_feedback
+  ).length;
 
   if (classesLoading) return <p className="text-slate-400">단체반 불러오는 중...</p>;
 
@@ -334,137 +388,196 @@ export default function TeacherClassInterview() {
       </div>
 
       {!selClass ? (
-        <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">단체반을 선택해주세요.</p>
+        <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
+          단체반을 선택해주세요.
+        </p>
       ) : (
         <>
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-sm font-medium text-seum-navy">
-              {getCategoryLabel(selClass.assignment.category_key)}
-              {getSubLabel(selClass.assignment.category_key, selClass.assignment.sub_key) && (
-                <span className="ml-1 text-seum-blue">· {getSubLabel(selClass.assignment.category_key, selClass.assignment.sub_key)}</span>
-              )}
-              <span className="ml-2 text-xs text-slate-400">학생 {students.length}명</span>
+          {/* 학생 선택 */}
+          <div className="mb-5">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-medium text-slate-500">학생 선택</p>
+              <span className="text-xs text-slate-400">
+                {getCategoryLabel(selClass.assignment.category_key)}
+                {getSubLabel(selClass.assignment.category_key, selClass.assignment.sub_key) &&
+                  ` · ${getSubLabel(selClass.assignment.category_key, selClass.assignment.sub_key)}`}
+                {` · 학생 ${students.length}명`}
+              </span>
             </div>
-            <button type="button" onClick={genAll} disabled={bulkRunning || loading}
-              className="rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-50">
-              {bulkRunning ? `생성 중... (${bulkProgress.done}/${bulkProgress.total})` : "✨ 전체 AI 초안 생성"}
-            </button>
-          </div>
-
-          {/* 진행 바 */}
-          {bulkRunning && (
-            <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-slate-200">
-              <div className="h-full rounded-full bg-seum-blue transition-all"
-                style={{ width: `${bulkProgress.total ? (bulkProgress.done / bulkProgress.total) * 100 : 0}%` }} />
-            </div>
-          )}
-
-          {/* 탭 */}
-          <div className="mb-5 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-            {tabs.map((t) => {
-              const on = activeTab === t.key;
-              return (
-                <button key={t.key} type="button" onClick={() => setActiveTab(t.key)}
-                  className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${on ? "bg-seum-blue text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
-                  {t.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* 직렬 선택 (기출문제 탭 전용) */}
-          {showSeriesPicker && (
-            <div className="mb-5">
-              <p className="mb-2 text-xs font-bold text-slate-500">직렬 선택</p>
+            {students.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-slate-300 py-6 text-center text-sm text-slate-400">
+                이 반에 등록된 학생이 없습니다.
+              </p>
+            ) : (
               <div className="flex flex-wrap gap-2">
-                {seriesList.map((s) => {
-                  const on = activeSeries === s.key;
+                {students.map((s) => {
+                  const on = selStudent?.id === s.id;
                   return (
-                    <button
-                      key={s.key}
-                      type="button"
-                      onClick={() => setActiveSeries(on ? null : s.key)}
-                      className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                        on
-                          ? "bg-seum-navy text-white"
-                          : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      {s.label}
+                    <button key={s.id} type="button" onClick={() => setSelStudent(s)}
+                      className={`rounded-lg border px-4 py-2 text-sm font-bold transition ${on ? "border-seum-navy bg-seum-navy text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                      {s.name}
                     </button>
                   );
                 })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {loading ? (
-            <p className="py-10 text-center text-slate-400">불러오는 중...</p>
-          ) : questions.length === 0 ? (
+          {!selStudent ? (
             <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
-              {showSeriesPicker && !activeSeries
-                ? "직렬을 선택하면 해당 직렬의 기출문제가 표시됩니다."
-                : "이 탭에 등록된 질문이 없습니다."}
+              학생을 선택하면 답변과 피드백이 표시됩니다.
             </p>
           ) : (
-            <div className="space-y-6">
-              {questions.map((qRow, qi) => (
-                <div key={qRow.id} className="rounded-xl border border-slate-200 bg-white p-4">
-                  <p className="mb-3 font-bold text-seum-navy">
-                    <span className="mr-1 text-slate-400">{qi + 1}.</span>{qRow.question}
-                  </p>
+            <>
+              {/* 탭 */}
+              <div className="mb-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+                {tabs.map((t) => {
+                  const on = activeTab === t.key;
+                  const st = tabStats[t.key];
+                  return (
+                    <button key={t.key} type="button" onClick={() => setActiveTab(t.key)}
+                      className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition ${on ? "bg-seum-blue text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+                      {t.label}
+                      {st?.answered > 0 && (
+                        <span className={`rounded-full px-1.5 text-[10px] font-black ${
+                          on
+                            ? "bg-white/25 text-white"
+                            : st.feedbacked >= st.answered
+                            ? "bg-green-100 text-green-700"
+                            : "bg-amber-100 text-amber-700"
+                        }`}>
+                          {st.feedbacked}/{st.answered}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
 
-                  {/* 학생별 답변 */}
-                  <div className="space-y-3">
-                    {students.map((s) => {
-                      const a = answersByQ[qRow.id]?.[s.id];
-                      const hasAnswer = !!a?.student_answer;
-                      return (
-                        <div key={s.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                          <div className="mb-1.5 flex items-center justify-between">
-                            <span className="text-sm font-bold text-seum-navy">{s.name}</span>
-                            {a?.teacher_feedback ? (
-                              <span className="text-xs text-green-600">✓ 확정됨</span>
+              {/* 학생 · 탭 헤더 + 일괄 AI */}
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-sm font-bold text-seum-navy">
+                  {selStudent.name}
+                  <span className="ml-2 text-xs font-medium text-slate-400">
+                    {getTabLabel(selClass.assignment.category_key, activeTab)}
+                    {pendingCount > 0 && ` · 미확정 ${pendingCount}건`}
+                  </span>
+                </div>
+                <button type="button" onClick={genAllForStudent} disabled={bulkRunning || loading || pendingCount === 0}
+                  className="rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-50">
+                  {bulkRunning ? `생성 중... (${bulkProgress.done}/${bulkProgress.total})` : "✨ 이 탭 전체 AI 초안"}
+                </button>
+              </div>
+
+              {/* 진행 바 */}
+              {bulkRunning && (
+                <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                  <div className="h-full rounded-full bg-seum-blue transition-all"
+                    style={{ width: `${bulkProgress.total ? (bulkProgress.done / bulkProgress.total) * 100 : 0}%` }} />
+                </div>
+              )}
+
+              {loading ? (
+                <p className="py-10 text-center text-slate-400">불러오는 중...</p>
+              ) : rows.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
+                  {activeTab === "gichul"
+                    ? "이 학생이 제출한 기출문제 답변이 없습니다."
+                    : "이 탭에 등록된 질문이 없습니다."}
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {rows.map((qRow, i) => {
+                    const a = qRow._answer;
+                    const hasAnswer = !!a?.student_answer?.trim();
+
+                    // 현재 편집중인 텍스트가 확정된 피드백과 같은지
+                    const confirmed =
+                      !!a?.teacher_feedback &&
+                      (draftEdits[a.id] ?? "").trim() === a.teacher_feedback.trim();
+
+                    return (
+                      <div
+                        key={qRow.id}
+                        className={`rounded-xl border bg-white p-4 transition ${
+                          confirmed ? "border-slate-300" : "border-slate-200"
+                        }`}
+                      >
+                        <div className="mb-2 flex items-start justify-between gap-3">
+                          <p className="font-medium text-seum-navy">
+                            <span className="mr-1 text-slate-400">{i + 1}.</span>
+                            {qRow.question}
+                          </p>
+                          <span className="shrink-0 pt-0.5">
+                            {confirmed ? (
+                              <span className="text-xs text-green-600">
+                                ✓ 전달됨 {a.feedback_at && <span className="text-slate-400">{fmtTime(a.feedback_at)}</span>}
+                              </span>
+                            ) : a?.teacher_feedback ? (
+                              <span className="text-xs text-amber-600">수정됨 — 재전달 필요</span>
                             ) : a?.ai_draft ? (
                               <span className="text-xs text-amber-600">초안 대기</span>
                             ) : hasAnswer ? (
                               <span className="text-xs text-slate-400">미피드백</span>
                             ) : (
-                              <span className="text-xs text-slate-300">미답변</span>
+                              <span className="text-xs text-slate-300">미제출</span>
                             )}
-                          </div>
-
-                          {hasAnswer ? (
-                            <>
-                              <p className="mb-2 whitespace-pre-wrap rounded bg-white px-2.5 py-2 text-sm leading-relaxed text-slate-700">{a.student_answer}</p>
-                              <div className="mb-1.5 flex items-center justify-between">
-                                <span className="text-[11px] font-semibold uppercase tracking-wide text-seum-blue">피드백</span>
-                                <button type="button" onClick={() => genSingle(qRow, s.id)} disabled={aiLoadingId === a.id || bulkRunning}
-                                  className="rounded-md border border-seum-blue px-2.5 py-0.5 text-xs font-bold text-seum-blue hover:bg-blue-50 disabled:opacity-50">
-                                  {aiLoadingId === a.id ? "생성 중..." : a.ai_draft ? "🔄 다시" : "✨ AI"}
-                                </button>
-                              </div>
-                              <textarea value={draftEdits[a.id] ?? ""} onChange={(e) => setDraftEdits((p) => ({ ...p, [a.id]: e.target.value }))}
-                                rows={3}
-                                placeholder="AI 초안 생성 또는 직접 작성"
-                                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm outline-none focus:border-seum-blue" />
-                              <div className="mt-1.5 flex justify-end">
-                                <button type="button" onClick={() => confirmOne(qRow, s.id)} disabled={savingId === a.id}
-                                  className="rounded-lg bg-seum-blue px-3 py-1 text-xs font-bold text-white hover:bg-[#2a63c4] disabled:opacity-50">
-                                  {savingId === a.id ? "저장 중..." : "확정"}
-                                </button>
-                              </div>
-                            </>
-                          ) : (
-                            <p className="text-xs text-slate-400">아직 답변하지 않았습니다.</p>
-                          )}
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
+
+                        {hasAnswer ? (
+                          <>
+                            <div className="mb-3 rounded-lg bg-slate-50 px-3 py-2.5">
+                              <div className="mb-1 flex items-center justify-between">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">학생 답변</p>
+                                {a.submitted_at && (
+                                  <span className="text-[10px] text-slate-400">{fmtTime(a.submitted_at)} 제출</span>
+                                )}
+                              </div>
+                              <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{a.student_answer}</p>
+                            </div>
+
+                            <div className="mb-1.5 flex items-center justify-between">
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-seum-blue">피드백</span>
+                              <button type="button" onClick={() => genSingle(qRow)} disabled={aiLoadingId === a.id || bulkRunning}
+                                className="rounded-md border border-seum-blue px-2.5 py-0.5 text-xs font-bold text-seum-blue hover:bg-blue-50 disabled:opacity-50">
+                                {aiLoadingId === a.id ? "생성 중..." : a.ai_draft ? "🔄 다시" : "✨ AI"}
+                              </button>
+                            </div>
+                            <textarea value={draftEdits[a.id] ?? ""} onChange={(e) => setDraftEdits((p) => ({ ...p, [a.id]: e.target.value }))}
+                              rows={5}
+                              placeholder="AI 초안 생성 또는 직접 작성"
+                              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
+                            <div className="mt-2 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => confirmOne(qRow)}
+                                disabled={savingId === a.id || confirmed}
+                                className={`rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
+                                  confirmed
+                                    ? "cursor-default bg-slate-700"
+                                    : "bg-seum-blue hover:bg-[#2a63c4]"
+                                }`}
+                              >
+                                {savingId === a.id
+                                  ? "저장 중..."
+                                  : confirmed
+                                  ? "✓ 전달 완료"
+                                  : a.teacher_feedback
+                                  ? "수정 내용 재전달"
+                                  : "피드백 확정"}
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-xs text-slate-400">아직 제출하지 않았습니다.</p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
         </>
       )}
