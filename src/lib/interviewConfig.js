@@ -151,3 +151,22 @@ export function getTabLabel(categoryKey, tabKey) {
   const tab = cat?.tabs.find((t) => t.key === tabKey);
   return tab ? tab.label : tabKey;
 }
+
+// ============================================================
+// 면접 자료집 (카테고리·지자체별)
+// Supabase Storage: student-files 버킷
+// ============================================================
+export const MATERIALS = {
+  "gov:incheon": [
+    {
+      title: "2026 인천광역시 시정정책통계 현안",
+      description: "인천시 공무원 면접 대비 필수 자료",
+      path: "interview-materials/incheon-policy-2026.pdf",
+    },
+  ],
+};
+
+export function getMaterials(categoryKey, subKey) {
+  const key = subKey ? `${categoryKey}:${subKey}` : categoryKey;
+  return MATERIALS[key] ?? [];
+}
