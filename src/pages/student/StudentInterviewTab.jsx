@@ -300,9 +300,10 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const [savingId, setSavingId] = useState(null);
   const [loadingQ, setLoadingQ] = useState(false);
 
-  // 자동 저장 상태
+  // 자동 저장 / 전달 완료 상태
   const [autoSavingIds, setAutoSavingIds] = useState({}); // { [questionId]: true }
   const [autoSavedIds, setAutoSavedIds] = useState({});   // { [questionId]: true }
+  const [submittedIds, setSubmittedIds] = useState({});   // { [questionId]: true }
   const questionsRef = useRef(questions);
   questionsRef.current = questions;
 
@@ -491,10 +492,20 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
   const saveAnswer = async (q) => {
     if (locked) return alert("수강이 종료되어 답변을 저장할 수 없습니다. 재등록 후 이용해주세요.");
+    const text = (answers[q.id] ?? "").trim();
+    if (!text) return alert("답변을 작성해주세요.");
+
     setSavingId(q.id);
     try {
       await persistAnswer(q.id, answers[q.id] ?? "");
-      alert("답변이 저장되어 선생님에게 전달되었습니다.");
+      setSubmittedIds((p) => ({ ...p, [q.id]: true }));
+      setTimeout(() => {
+        setSubmittedIds((p) => {
+          const next = { ...p };
+          delete next[q.id];
+          return next;
+        });
+      }, 3000);
     } catch (e) {
       alert("저장 실패: " + e.message);
     } finally {
@@ -603,8 +614,14 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
             // 차트가 있으면 진단 블록은 텍스트에서 제거
             const fbText = grades ? stripDiagnosis(fb) : fb;
             const dirty = (answers[q.id] ?? "") !== (a?.student_answer ?? "");
+            const submitted = !!submittedIds[q.id];
             return (
-              <div key={q.id} className="rounded-xl border border-slate-200 bg-white p-4">
+              <div
+                key={q.id}
+                className={`rounded-xl border bg-white p-4 transition ${
+                  submitted ? "border-green-300 bg-green-50/40" : "border-slate-200"
+                }`}
+              >
                 <p className="mb-2 font-medium text-seum-navy">
                   <span className="mr-1 text-slate-400">{i + 1}.</span>
                   {q.question}
@@ -618,7 +635,11 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue disabled:bg-slate-50 disabled:text-slate-400"
                 />
                 <div className="mt-2 flex items-center justify-between">
-                  {autoSavingIds[q.id] ? (
+                  {submitted ? (
+                    <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-bold text-green-700">
+                      ✓ 선생님께 전달되었습니다
+                    </span>
+                  ) : autoSavingIds[q.id] ? (
                     <span className="text-xs text-slate-400">저장 중...</span>
                   ) : autoSavedIds[q.id] ? (
                     <span className="text-xs text-blue-600">자동 저장됨</span>
@@ -633,9 +654,11 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                     type="button"
                     onClick={() => saveAnswer(q)}
                     disabled={savingId === q.id || locked}
-                    className="rounded-lg bg-seum-blue px-4 py-1.5 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-50"
+                    className={`rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-50 ${
+                      submitted ? "bg-green-600" : "bg-seum-blue hover:bg-[#2a63c4]"
+                    }`}
                   >
-                    {savingId === q.id ? "저장 중..." : "저장"}
+                    {savingId === q.id ? "저장 중..." : submitted ? "✓ 전달 완료" : "저장"}
                   </button>
                 </div>
 

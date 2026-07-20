@@ -41,6 +41,12 @@ async function extractFnError(error) {
   return detail;
 }
 
+const fmtTime = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
 // ============================================================
 // 선생님 단체반 모드
 // 반 선택 → 학생 선택 → 탭 → 그 학생의 질문/답변/피드백
@@ -61,7 +67,6 @@ export default function TeacherClassInterview() {
   const [draftEdits, setDraftEdits] = useState({}); // { [answerId]: text }
   const [savingId, setSavingId] = useState(null);
   const [aiLoadingId, setAiLoadingId] = useState(null);
-  const [confirmedFlash, setConfirmedFlash] = useState({}); // { [answerId]: true }
 
   // 탭별 답변 현황 (학생 선택 시 계산)
   const [tabStats, setTabStats] = useState({}); // { [tabKey]: { answered, feedbacked } }
@@ -325,23 +330,16 @@ export default function TeacherClassInterview() {
     setSavingId(null);
     if (error) return alert("저장 실패: " + error.message);
 
+    const wasNew = !a.teacher_feedback;
     setRows((prev) =>
       prev.map((r) => (r.id === qRow.id ? { ...r, _answer: { ...r._answer, ...data } } : r))
     );
-    setTabStats((prev) => {
-      const cur = prev[activeTab] || { answered: 0, feedbacked: 0 };
-      return { ...prev, [activeTab]: { ...cur, feedbacked: cur.feedbacked + (a.teacher_feedback ? 0 : 1) } };
-    });
-
-    // 확정 완료 표시 (3초)
-    setConfirmedFlash((p) => ({ ...p, [a.id]: true }));
-    setTimeout(() => {
-      setConfirmedFlash((p) => {
-        const next = { ...p };
-        delete next[a.id];
-        return next;
+    if (wasNew) {
+      setTabStats((prev) => {
+        const cur = prev[activeTab] || { answered: 0, feedbacked: 0 };
+        return { ...prev, [activeTab]: { ...cur, feedbacked: cur.feedbacked + 1 } };
       });
-    }, 3000);
+    }
   };
 
   const cat = selClass ? getCategory(selClass.assignment.category_key) : null;
@@ -482,12 +480,17 @@ export default function TeacherClassInterview() {
                   {rows.map((qRow, i) => {
                     const a = qRow._answer;
                     const hasAnswer = !!a?.student_answer?.trim();
-                    const flashed = a ? !!confirmedFlash[a.id] : false;
+
+                    // 현재 편집중인 텍스트가 확정된 피드백과 같은지
+                    const confirmed =
+                      !!a?.teacher_feedback &&
+                      (draftEdits[a.id] ?? "").trim() === a.teacher_feedback.trim();
+
                     return (
                       <div
                         key={qRow.id}
                         className={`rounded-xl border bg-white p-4 transition ${
-                          flashed ? "border-green-300 bg-green-50/40" : "border-slate-200"
+                          confirmed ? "border-slate-300" : "border-slate-200"
                         }`}
                       >
                         <div className="mb-2 flex items-start justify-between gap-3">
@@ -496,12 +499,12 @@ export default function TeacherClassInterview() {
                             {qRow.question}
                           </p>
                           <span className="shrink-0 pt-0.5">
-                            {flashed ? (
-                              <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">
-                                ✓ 학생에게 전달됨
+                            {confirmed ? (
+                              <span className="text-xs text-green-600">
+                                ✓ 전달됨 {a.feedback_at && <span className="text-slate-400">{fmtTime(a.feedback_at)}</span>}
                               </span>
                             ) : a?.teacher_feedback ? (
-                              <span className="text-xs text-green-600">✓ 확정됨</span>
+                              <span className="text-xs text-amber-600">수정됨 — 재전달 필요</span>
                             ) : a?.ai_draft ? (
                               <span className="text-xs text-amber-600">초안 대기</span>
                             ) : hasAnswer ? (
@@ -534,12 +537,20 @@ export default function TeacherClassInterview() {
                               <button
                                 type="button"
                                 onClick={() => confirmOne(qRow)}
-                                disabled={savingId === a.id}
-                                className={`rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-50 ${
-                                  flashed ? "bg-green-600" : "bg-seum-blue hover:bg-[#2a63c4]"
+                                disabled={savingId === a.id || confirmed}
+                                className={`rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
+                                  confirmed
+                                    ? "cursor-default bg-slate-700"
+                                    : "bg-seum-blue hover:bg-[#2a63c4]"
                                 }`}
                               >
-                                {savingId === a.id ? "저장 중..." : flashed ? "✓ 완료" : "피드백 확정"}
+                                {savingId === a.id
+                                  ? "저장 중..."
+                                  : confirmed
+                                  ? "✓ 전달 완료"
+                                  : a.teacher_feedback
+                                  ? "수정 내용 재전달"
+                                  : "피드백 확정"}
                               </button>
                             </div>
                           </>
