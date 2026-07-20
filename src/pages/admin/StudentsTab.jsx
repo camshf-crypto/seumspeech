@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { CATEGORY_LIST, getCategory } from "../../lib/interviewConfig";
+import StudentPaymentSection from "./StudentPaymentSection";
 
 const INTERVIEW_TITLES = ["1:1 공무원면접", "1:1 공기업면접", "1:1 사기업면접"];
 const GONGMUWON = "1:1 공무원면접";
 const EXAM_TYPES = ["국가직", "지방직", "서울시", "소방", "경찰", "교육행정", "군무원", "기타"];
 const CAREER_LEVELS = ["신입", "경력"];
-
-const FUNCTION_URL = "https://ogjnbrvtuowtavzdbcpx.supabase.co/functions/v1/interview-generate";
-
-const INTERVIEW_CATEGORIES = ["인성", "상황", "경험", "기출", "토론", "PT", "공직관", "안보관"];
 
 const STATUS_TABS = [
   { key: "all", label: "전체" },
@@ -66,12 +64,13 @@ export default function StudentsTab({ branchId }) {
   const [bookingsMap, setBookingsMap] = useState({}); // enrollment_id -> [bookings]
   const [bookForm, setBookForm] = useState({}); // enrollment_id -> {date, time}
 
-  const [qTarget, setQTarget] = useState(null);
-  const [qTitle, setQTitle] = useState("");
-  const [qBlocks, setQBlocks] = useState([{ category: "인성", source_text: "" }]);
-  const [qGenerating, setQGenerating] = useState(false);
-  const [qProgress, setQProgress] = useState(0);
-  const [qStage, setQStage] = useState("");
+  // ===== 면접 카테고리 배정 모달 상태 (기존 질문생성 모달 대체) =====
+  const [assignTarget, setAssignTarget] = useState(null); // { student }
+  const [assignCategory, setAssignCategory] = useState("");
+  const [assignSub, setAssignSub] = useState("");
+  const [assignSaving, setAssignSaving] = useState(false);
+  // 학생별 현재 배정 요약 { [studentId]: { category_key, sub_key } }
+  const [interviewAssignMap, setInterviewAssignMap] = useState({});
 
   const loadBase = async () => {
     setLoading(true);
@@ -83,13 +82,20 @@ export default function StudentsTab({ branchId }) {
     const { data: enr } = await supabase
       .from("enrollments")
       .select("*, courses(title, type, branch_id), teacher:teacher_id(name)");
+    const { data: ia } = await supabase
+      .from("interview_assignments")
+      .select("student_id, category_key, sub_key");
 
     const map = {};
     (enr ?? []).forEach((e) => {
       (map[e.student_id] = map[e.student_id] || []).push(e);
     });
+    const iaMap = {};
+    (ia ?? []).forEach((a) => { iaMap[a.student_id] = { category_key: a.category_key, sub_key: a.sub_key }; });
+
     setStudents(st ?? []);
     setEnrollMap(map);
+    setInterviewAssignMap(iaMap);
     setGroupCourses((cs ?? []).filter((c) => c.type === "group"));
     setOneCourses((cs ?? []).filter((c) => c.type === "oneonone"));
     setTeachers(tc ?? []);
@@ -270,9 +276,12 @@ export default function StudentsTab({ branchId }) {
   const assignGroup = async () => {
     if (!pickCourse) return alert("반을 선택하세요.");
     setAssigning(true);
+    // 선택한 반의 정해진 회차를 자동 사용 (면접반: sessions_total, 없으면 기본 6)
+    const course = groupCourses.find((c) => c.id === pickCourse);
+    const totalSessions = course?.sessions_total ?? 6;
     const { error } = await supabase.from("enrollments").insert({
       student_id: selected.id, course_id: pickCourse,
-      total_sessions: sessions, remaining_sessions: sessions, status: "active",
+      total_sessions: totalSessions, remaining_sessions: totalSessions, status: "active",
     });
     setAssigning(false);
     if (error) return alert("배정 실패: " + error.message);
@@ -384,87 +393,80 @@ export default function StudentsTab({ branchId }) {
     await refreshKeepOpen();
   };
 
-  const openQuestionGen = (student) => {
-    const enr = interviewEnroll(student.id);
-    if (!enr) return alert("이 학생은 1:1 면접 수강생이 아닙니다.");
-    setQTarget({ student, enroll: enr });
-    setQTitle("");
-    setQBlocks([{ category: "인성", source_text: "" }]);
-  };
-
-  const addBlock = () => setQBlocks((p) => [...p, { category: "상황", source_text: "" }]);
-  const removeBlock = (i) => setQBlocks((p) => p.filter((_, idx) => idx !== i));
-  const updateBlock = (i, key, val) =>
-    setQBlocks((p) => p.map((b, idx) => (idx === i ? { ...b, [key]: val } : b)));
-
-  const generateQuestions = async () => {
-    const validBlocks = qBlocks
-      .map((b) => ({ category: b.category, source_text: b.source_text.trim() }))
-      .filter((b) => b.source_text);
-    if (validBlocks.length === 0) return alert("카테고리에 기출 면접 질문을 입력하세요.");
-
-    setQGenerating(true);
-    setQProgress(0);
-    setQStage("학생 정보 분석 중...");
-
-    const stages = [
-      { at: 0, msg: "학생 정보 분석 중..." },
-      { at: 20, msg: "기출 질문 변환 중..." },
-      { at: 50, msg: "카테고리별 정리 중..." },
-      { at: 75, msg: "강사용 지도자료 생성 중..." },
-    ];
-    const timer = setInterval(() => {
-      setQProgress((p) => {
-        const next = p + Math.random() * 6 + 2;
-        const capped = next > 90 ? 90 : next;
-        const stage = [...stages].reverse().find((s) => capped >= s.at);
-        if (stage) setQStage(stage.msg);
-        return capped;
-      });
-    }, 600);
-
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess?.session?.access_token;
-      const res = await fetch(FUNCTION_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          enrollment_id: qTarget.enroll.id,
-          blocks: validBlocks,
-          title: qTitle || "모의면접",
-        }),
-      });
-      const data = await res.json();
-      clearInterval(timer);
-      if (!res.ok || data.error) {
-        setQProgress(0);
-        setQStage("");
-        alert("생성 실패: " + (data.error || res.status));
-      } else {
-        setQProgress(100);
-        setQStage("완료!");
-        setTimeout(() => {
-          alert(`질문 ${data.count}개가 생성되어 학생·선생님에게 전달되었습니다.`);
-          setQTarget(null);
-          setQProgress(0);
-          setQStage("");
-        }, 400);
-      }
-    } catch (e) {
-      clearInterval(timer);
-      setQProgress(0);
-      setQStage("");
-      alert("오류: " + e.message);
-    } finally {
-      setQGenerating(false);
+  // ===== 면접 카테고리 배정 모달 (기존 질문생성 대체) =====
+  const openAssign = (student) => {
+    const cur = interviewAssignMap[student.id];
+    setAssignTarget({ student });
+    if (cur) {
+      setAssignCategory(cur.category_key);
+      setAssignSub(cur.sub_key ?? "");
+    } else {
+      setAssignCategory("");
+      setAssignSub("");
     }
   };
 
+  const onPickCategory = (key) => {
+    setAssignCategory(key);
+    const cat = getCategory(key);
+    // 공무원이면 첫 세부 자동, 아니면 비움
+    setAssignSub(cat?.subs?.length ? cat.subs[0].key : "");
+  };
+
+  const saveAssign = async () => {
+    if (!assignCategory) return alert("카테고리를 선택하세요.");
+    const cat = getCategory(assignCategory);
+    if (cat?.subs?.length && !assignSub) return alert("세부(인천/서울)를 선택하세요.");
+    setAssignSaving(true);
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from("interview_assignments")
+      .upsert(
+        {
+          student_id: assignTarget.student.id,
+          category_key: assignCategory,
+          sub_key: cat?.subs?.length ? assignSub : null,
+          updated_at: now,
+        },
+        { onConflict: "student_id" }
+      );
+    setAssignSaving(false);
+    if (error) return alert("저장 실패: " + error.message);
+    setInterviewAssignMap((p) => ({
+      ...p,
+      [assignTarget.student.id]: { category_key: assignCategory, sub_key: cat?.subs?.length ? assignSub : null },
+    }));
+    alert("면접 카테고리가 배정되었습니다. 학생 화면에 해당 질문이 표시됩니다.");
+    setAssignTarget(null);
+  };
+
+  const clearAssign = async () => {
+    if (!window.confirm("이 학생의 면접 카테고리 배정을 해제할까요?")) return;
+    setAssignSaving(true);
+    const { error } = await supabase.from("interview_assignments").delete().eq("student_id", assignTarget.student.id);
+    setAssignSaving(false);
+    if (error) return alert("해제 실패: " + error.message);
+    setInterviewAssignMap((p) => {
+      const next = { ...p };
+      delete next[assignTarget.student.id];
+      return next;
+    });
+    alert("배정이 해제되었습니다.");
+    setAssignTarget(null);
+  };
+
+  const assignBadge = (sid) => {
+    const a = interviewAssignMap[sid];
+    if (!a) return null;
+    const cat = getCategory(a.category_key);
+    if (!cat) return null;
+    const subLabel = cat.subs?.find((s) => s.key === a.sub_key)?.label;
+    return subLabel ? `${cat.label}·${subLabel}` : cat.label;
+  };
+
   if (loading) return <p className="text-slate-400">불러오는 중...</p>;
+
+  const assignCat = assignCategory ? getCategory(assignCategory) : null;
 
   return (
     <div>
@@ -506,6 +508,7 @@ export default function StudentsTab({ branchId }) {
               const sttLabel = stt === "active" ? "수강중" : stt === "done" ? "완료" : "등록대기";
               const sttColor = stt === "active" ? "bg-green-50 text-green-600" : stt === "done" ? "bg-slate-100 text-slate-500" : "bg-amber-50 text-amber-600";
               const hasInterview = !!interviewEnroll(s.id);
+              const badge = assignBadge(s.id);
               return (
                 <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50">
                   <td className="cursor-pointer px-4 py-3 font-medium text-seum-navy" onClick={() => openStudent(s)}>{s.name || "이름없음"}</td>
@@ -514,17 +517,18 @@ export default function StudentsTab({ branchId }) {
                   <td className="cursor-pointer px-4 py-3 text-slate-600" onClick={() => openStudent(s)}>{remainSummary(s.id)}</td>
                   <td className="cursor-pointer px-4 py-3" onClick={() => openStudent(s)}><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${sttColor}`}>{sttLabel}</span></td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-1.5">
+                    <div className="flex items-center gap-1.5">
                       <button type="button" onClick={() => openStudent(s)} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">수정</button>
                       <button
                         type="button"
-                        onClick={() => openQuestionGen(s)}
+                        onClick={() => openAssign(s)}
                         disabled={!hasInterview}
                         className={`rounded-md px-2.5 py-1 text-xs font-medium ${hasInterview ? "bg-seum-blue text-white hover:bg-[#2a63c4]" : "cursor-not-allowed bg-slate-100 text-slate-300"}`}
-                        title={hasInterview ? "면접 질문지 생성" : "1:1 면접 수강생만 가능"}
+                        title={hasInterview ? "면접 카테고리 배정" : "1:1 면접 수강생만 가능"}
                       >
-                        질문생성
+                        면접설정
                       </button>
+                      {badge && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-seum-blue">{badge}</span>}
                     </div>
                   </td>
                 </tr>
@@ -543,6 +547,7 @@ export default function StudentsTab({ branchId }) {
           const sttLabel = stt === "active" ? "수강중" : stt === "done" ? "완료" : "등록대기";
           const sttColor = stt === "active" ? "bg-green-50 text-green-600" : stt === "done" ? "bg-slate-100 text-slate-500" : "bg-amber-50 text-amber-600";
           const hasInterview = !!interviewEnroll(s.id);
+          const badge = assignBadge(s.id);
           return (
             <div key={s.id} className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex items-start justify-between" onClick={() => openStudent(s)}>
@@ -562,17 +567,23 @@ export default function StudentsTab({ branchId }) {
                   <span className="flex-shrink-0 text-slate-400">잔여</span>
                   <span className="text-right text-slate-700">{remainSummary(s.id)}</span>
                 </div>
+                {badge && (
+                  <div className="flex justify-between gap-3">
+                    <span className="flex-shrink-0 text-slate-400">면접</span>
+                    <span className="text-right font-medium text-seum-blue">{badge}</span>
+                  </div>
+                )}
               </div>
 
               <div className="mt-3 flex gap-2">
                 <button type="button" onClick={() => openStudent(s)} className="flex-1 rounded-lg border border-slate-300 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">수정</button>
                 <button
                   type="button"
-                  onClick={() => openQuestionGen(s)}
+                  onClick={() => openAssign(s)}
                   disabled={!hasInterview}
                   className={`flex-1 rounded-lg py-2 text-sm font-medium ${hasInterview ? "bg-seum-blue text-white hover:bg-[#2a63c4]" : "cursor-not-allowed bg-slate-100 text-slate-300"}`}
                 >
-                  질문생성
+                  면접설정
                 </button>
               </div>
             </div>
@@ -611,6 +622,15 @@ export default function StudentsTab({ branchId }) {
               <textarea value={memoText} onChange={(e) => setMemoText(e.target.value)} rows={6}
                 placeholder="학생 관련 메모를 자유롭게 작성하세요."
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
+            </div>
+
+            {/* 결제 (결제창 발행 / 대기 / 완료) */}
+            <div className="rounded-lg border border-slate-200 p-4">
+              <StudentPaymentSection
+                student={selected}
+                branchId={branchId}
+                courses={[...groupCourses, ...oneCourses]}
+              />
             </div>
 
             {/* 수강 현황 — 항상 편집폼 */}
@@ -731,15 +751,20 @@ export default function StudentsTab({ branchId }) {
                   </div>
 
                   {enrollTab === "group" && (
-                    <div className="flex flex-col gap-2 sm:flex-row">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                       <select value={pickCourse} onChange={(e) => setPickCourse(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue">
                         <option value="">반 선택...</option>
                         {groupCourses.filter((c) => c.branch_id === branchId).map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
                       </select>
-                      <div className="flex items-center gap-1">
-                        <input type="number" value={sessions} onChange={(e) => setSessions(Number(e.target.value))} className="w-20 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-                        <span className="text-sm text-slate-500">회</span>
-                      </div>
+                      {pickCourse && (
+                        <span className="text-sm text-slate-500">
+                          {(() => {
+                            const c = groupCourses.find((x) => x.id === pickCourse);
+                            const n = c?.sessions_total ?? 6;
+                            return `총 ${n}회`;
+                          })()}
+                        </span>
+                      )}
                       <button type="button" onClick={assignGroup} disabled={assigning} className="rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60">배정</button>
                     </div>
                   )}
@@ -805,80 +830,96 @@ export default function StudentsTab({ branchId }) {
         </div>
       )}
 
-      {/* 면접 질문 생성 팝업 */}
-      {qTarget && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={() => setQTarget(null)}>
-          <div className="my-8 w-full max-w-xl space-y-4 rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+      {/* 면접 카테고리 배정 팝업 (기존 질문생성 모달 대체) */}
+      {assignTarget && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={() => setAssignTarget(null)}>
+          <div className="my-8 w-full max-w-md space-y-4 rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold text-seum-navy">면접 질문 생성</h3>
-              <button type="button" onClick={() => setQTarget(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+              <h3 className="text-lg font-bold text-seum-navy">면접 카테고리 배정</h3>
+              <button type="button" onClick={() => setAssignTarget(null)} className="text-slate-400 hover:text-slate-700">✕</button>
             </div>
 
             <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
-              <p className="font-medium text-seum-navy">{qTarget.student.name}</p>
-              <p className="mt-0.5 text-xs">
-                {qTarget.enroll.courses?.title?.replace("1:1 ", "")}
-                {qTarget.enroll.company ? ` · ${qTarget.enroll.company}` : ""}
-                {qTarget.enroll.exam_type ? ` · ${qTarget.enroll.exam_type}` : ""}
-                {qTarget.enroll.job_role ? ` · ${qTarget.enroll.job_role}` : ""}
-                {qTarget.enroll.career_level ? ` · ${qTarget.enroll.career_level}` : ""}
-              </p>
+              <p className="font-medium text-seum-navy">{assignTarget.student.name}</p>
+              <p className="mt-0.5 text-xs">카테고리를 선택하면 학생 화면에 해당 질문이 자동으로 표시됩니다.</p>
             </div>
 
+            {/* 카테고리 선택 */}
             <div>
-              <label className="mb-1 block text-xs text-slate-500">제목 (회차 등)</label>
-              <input value={qTitle} onChange={(e) => setQTitle(e.target.value)} placeholder="예: 1회차 모의면접"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-            </div>
-
-            <div className="space-y-3">
-              <label className="block text-xs text-slate-500">카테고리별 기출 면접 질문</label>
-              {qBlocks.map((b, i) => (
-                <div key={i} className="rounded-lg border border-slate-200 p-3">
-                  <div className="mb-2 flex items-center gap-2">
-                    <select
-                      value={b.category}
-                      onChange={(e) => updateBlock(i, "category", e.target.value)}
-                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-seum-navy outline-none focus:border-seum-blue"
-                    >
-                      {INTERVIEW_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    {qBlocks.length > 1 ? (
-                      <button type="button" onClick={() => removeBlock(i)} className="ml-auto rounded-md px-2 py-1 text-xs text-red-400 hover:bg-red-50 hover:text-red-600">삭제</button>
-                    ) : null}
-                  </div>
-                  <textarea
-                    value={b.source_text}
-                    onChange={(e) => updateBlock(i, "source_text", e.target.value)}
-                    rows={5}
-                    placeholder={"이 카테고리의 기출 질문을 한 줄에 하나씩 붙여넣으세요."}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue"
-                  />
-                </div>
-              ))}
-              <button type="button" onClick={addBlock} className="w-full rounded-lg border border-dashed border-seum-blue py-2 text-sm font-medium text-seum-blue hover:bg-blue-50">
-                + 카테고리 추가
-              </button>
-              <p className="text-xs text-slate-400">AI가 학생의 지원정보에 맞게 변환하고 카테고리별로 정리해 강사용 지도자료를 붙입니다.</p>
-            </div>
-
-            {qGenerating ? (
-              <div className="rounded-lg bg-slate-50 p-4">
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="font-medium text-seum-navy">{qStage}</span>
-                  <span className="font-bold text-seum-blue">{Math.round(qProgress)}%</span>
-                </div>
-                <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
-                  <div className="h-full rounded-full bg-seum-blue transition-all duration-500 ease-out" style={{ width: `${qProgress}%` }} />
-                </div>
-                <p className="mt-2 text-xs text-slate-400">AI가 자료를 만들고 있습니다. 창을 닫지 말고 잠시 기다려주세요.</p>
+              <label className="mb-1.5 block text-xs text-slate-500">카테고리</label>
+              <div className="grid grid-cols-2 gap-2">
+                {CATEGORY_LIST.map((c) => (
+                  <button
+                    key={c.key}
+                    type="button"
+                    onClick={() => onPickCategory(c.key)}
+                    className={`rounded-lg border px-3 py-2.5 text-sm font-medium transition ${
+                      assignCategory === c.key
+                        ? "border-seum-blue bg-blue-50 text-seum-blue"
+                        : "border-slate-300 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {c.label}
+                  </button>
+                ))}
               </div>
-            ) : (
-              <button type="button" onClick={generateQuestions}
-                className="w-full rounded-lg bg-seum-blue py-2.5 text-sm font-bold text-white hover:bg-[#2a63c4]">
-                AI 질문 생성 후 발송
-              </button>
+            </div>
+
+            {/* 공무원 세부 (인천/서울) */}
+            {assignCat?.subs?.length ? (
+              <div>
+                <label className="mb-1.5 block text-xs text-slate-500">세부 선택</label>
+                <div className="flex gap-2">
+                  {assignCat.subs.map((sub) => (
+                    <button
+                      key={sub.key}
+                      type="button"
+                      onClick={() => setAssignSub(sub.key)}
+                      className={`flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition ${
+                        assignSub === sub.key
+                          ? "border-seum-blue bg-blue-50 text-seum-blue"
+                          : "border-slate-300 text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {sub.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {/* 선택된 탭 미리보기 */}
+            {assignCat && (
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="mb-1.5 text-xs font-medium text-slate-500">표시될 탭</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {assignCat.tabs.map((t) => (
+                    <span key={t.key} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{t.label}</span>
+                  ))}
+                </div>
+              </div>
             )}
+
+            <div className="flex items-center gap-2 pt-1">
+              {interviewAssignMap[assignTarget.student.id] && (
+                <button
+                  type="button"
+                  onClick={clearAssign}
+                  disabled={assignSaving}
+                  className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-500 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  배정 해제
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={saveAssign}
+                disabled={assignSaving}
+                className="flex-1 rounded-lg bg-seum-blue py-2.5 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60"
+              >
+                {assignSaving ? "저장 중..." : "저장"}
+              </button>
+            </div>
           </div>
         </div>
       )}

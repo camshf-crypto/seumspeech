@@ -11,7 +11,6 @@ import EnrollmentRequestForm from "./EnrollmentRequestForm";
 import AbsenceRequestTab from "./AbsenceRequestTab";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
-const INTERVIEW_TITLES = ["1:1 공무원면접", "1:1 공기업면접", "1:1 사기업면접"];
 
 const isExpired = (e) => {
   if (!e.expires_at) return false;
@@ -27,6 +26,7 @@ export default function StudentLayout() {
   const [active, setActive] = useState("courses");
   const [menuOpen, setMenuOpen] = useState(false);
   const [enrollments, setEnrollments] = useState([]);
+  const [hasAssignment, setHasAssignment] = useState(false);
   const [loading, setLoading] = useState(true);
   const [unread, setUnread] = useState(0);
 
@@ -54,9 +54,20 @@ export default function StudentLayout() {
     setLoading(true);
     const { data } = await supabase
       .from("enrollments")
-      .select("*, courses(title, type, weekday, start_time, start_date), teacher:teacher_id(name)")
+      .select(
+        "*, courses(title, type, weekday, start_time, start_date, course_kind, interview_category), teacher:teacher_id(name)"
+      )
       .eq("student_id", profile.id);
     setEnrollments(data ?? []);
+
+    // 개별 면접 배정 확인
+    const { data: asg } = await supabase
+      .from("interview_assignments")
+      .select("student_id")
+      .eq("student_id", profile.id)
+      .maybeSingle();
+    setHasAssignment(!!asg);
+
     setLoading(false);
   };
 
@@ -111,7 +122,12 @@ export default function StudentLayout() {
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
   };
 
-  const hasInterview = enrollments.some((e) => INTERVIEW_TITLES.includes(e.courses?.title));
+  // 1:1 / 단체반 구분 없이 면접 수업이면 메뉴 노출
+  const hasInterview =
+    hasAssignment ||
+    enrollments.some(
+      (e) => e.courses?.course_kind === "interview" || !!e.courses?.interview_category
+    );
 
   const hasActive = enrollments.some((e) => !isExpired(e));
   const locked = enrollments.length > 0 && !hasActive;
@@ -121,11 +137,13 @@ export default function StudentLayout() {
     { key: "absence", label: "결석 신청" },
     { key: "materials", label: "자료 제출함" },
     { key: "homework", label: "숙제" },
-    ...(hasInterview ? [{ key: "interview", label: "면접 수업" }] : []),
+    ...(hasInterview ? [{ key: "interview", label: "단체면접 수업" }] : []),
     { key: "chat", label: "선생님과 채팅" },
     { key: "payments", label: "결제내역" },
     { key: "notifications", label: "알림" },
   ];
+
+  const current = MENUS.find((m) => m.key === active);
 
   if (statusLoading) {
     return (
@@ -186,66 +204,172 @@ export default function StudentLayout() {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setMenuOpen((v) => !v)}
-              className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 md:hidden"
-            >
-              {menuOpen ? (
-                <span className="text-lg leading-none">✕</span>
-              ) : (
-                <span className="flex flex-col gap-1">
-                  <span className="block h-0.5 w-5 bg-slate-600" />
-                  <span className="block h-0.5 w-5 bg-slate-600" />
-                  <span className="block h-0.5 w-5 bg-slate-600" />
-                </span>
-              )}
-              {unread > 0 && !menuOpen ? (
-                <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
-              ) : null}
-            </button>
-            <div>
-              <p className="text-lg font-bold text-seum-navy">내 강의실</p>
-              <p className="text-xs text-slate-400">{profile?.name}님</p>
+  // 메인 콘텐츠
+  const renderContent = () => (
+    <>
+      {locked && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-100 px-4 py-3">
+          <p className="text-sm font-bold text-slate-700">수강이 종료되었습니다</p>
+          <p className="mt-0.5 text-xs text-slate-500">지난 자료는 계속 확인하실 수 있지만, 새로운 제출·전송은 재등록 후 이용하실 수 있습니다.</p>
+        </div>
+      )}
+
+      {active === "courses" && (
+        <div>
+          <h2 className="mb-3 font-bold text-seum-navy">수강 현황</h2>
+          {loading ? (
+            <p className="text-slate-400">불러오는 중...</p>
+          ) : enrollments.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
+              아직 수강 중인 반이 없습니다.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {enrollments.map((e) => {
+                const isGroup = e.courses?.type === "group";
+                const expired = isExpired(e);
+                return (
+                  <div key={e.id} className={`rounded-xl border border-slate-200 bg-white p-5 ${expired ? "opacity-60" : ""}`}>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="font-bold text-seum-navy">
+                          {e.courses?.title}
+                          <span className="ml-2 text-xs text-slate-400">{isGroup ? "단체반" : "1:1"}</span>
+                          {expired ? <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">종료</span> : null}
+                        </p>
+                        {e.teacher?.name && (
+                          <p className="mt-1 text-sm text-slate-500">담임 {e.teacher.name}</p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-seum-blue">{e.remaining_sessions}</p>
+                        <p className="text-xs text-slate-400">/ {e.total_sessions}회 남음</p>
+                      </div>
+                    </div>
+
+                    {e.expires_at ? (
+                      <p className="mt-2 text-xs text-slate-400">수강 종료일 {fmtDate(e.expires_at)}</p>
+                    ) : null}
+
+                    {isGroup && (
+                      <div className="mt-4 space-y-1 border-t border-slate-100 pt-3 text-sm text-slate-600">
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">수업 시간</span>
+                          <span>매주 {WEEKDAYS[e.courses?.weekday]}요일 {e.courses?.start_time?.slice(0, 5)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">개강일</span>
+                          <span>{fmtDate(e.courses?.start_date)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">종료 예정</span>
+                          <span>{endDate(e.courses?.start_date, e.total_sessions) ?? "-"}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => (window.location.href = "/home")} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50">홈으로</button>
-            <button onClick={handleLogout} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50">로그아웃</button>
-          </div>
+          )}
+        </div>
+      )}
+
+      {active === "absence" && <AbsenceRequestTab studentId={profile.id} />}
+      {active === "materials" && <MaterialsTab studentId={profile.id} locked={locked} />}
+      {active === "homework" && <HomeworkTab studentId={profile.id} locked={locked} />}
+      {active === "interview" && <StudentInterviewTab studentId={profile.id} locked={locked} />}
+      {active === "chat" && <ChatTab studentId={profile.id} onRead={loadUnread} locked={locked} />}
+      {active === "payments" && <PaymentsTab studentId={profile.id} />}
+      {active === "notifications" && (
+        <NotificationsTab userId={profile.id} onGoTab={(tab) => setActive(tab)} onRead={loadUnread} />
+      )}
+    </>
+  );
+
+  return (
+    <div className="flex min-h-screen bg-slate-50">
+      {/* 데스크탑 사이드바 */}
+      <aside className="sticky top-0 hidden h-screen w-60 flex-shrink-0 flex-col border-r border-slate-200 bg-white md:flex">
+        <div className="border-b border-slate-200 px-6 py-5">
+          <p className="text-lg font-bold text-seum-navy">내 강의실</p>
+          <p className="text-xs text-slate-400">{profile?.name}님</p>
         </div>
 
-        <div className="mx-auto hidden max-w-3xl gap-2 overflow-x-auto px-4 pb-3 md:flex">
+        <nav className="flex-1 px-3 py-4">
           {MENUS.map((m) => (
             <button
               key={m.key}
               onClick={() => setActive(m.key)}
-              className={`relative whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium transition ${active === m.key ? "bg-seum-blue text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
+              className={`mb-1 flex w-full items-center justify-between rounded-lg px-4 py-2 text-left text-[13px] font-medium transition ${
+                active === m.key ? "bg-seum-blue text-white" : "text-slate-600 hover:bg-slate-100"
+              }`}
             >
-              {m.label}
+              <span>{m.label}</span>
               {m.key === "notifications" && unread > 0 ? (
-                <span className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white">
+                <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-bold ${active === m.key ? "bg-white text-seum-blue" : "bg-red-500 text-white"}`}>
                   {unread}
                 </span>
               ) : null}
             </button>
           ))}
-        </div>
+        </nav>
 
+        <div className="border-t border-slate-200 p-3">
+          <button onClick={() => (window.location.href = "/home")} className="mb-1 block w-full rounded-lg px-4 py-2 text-left text-sm text-slate-500 hover:bg-slate-100">
+            ← 홈으로
+          </button>
+          <button onClick={handleLogout} className="block w-full rounded-lg px-4 py-2 text-left text-sm text-slate-500 hover:bg-slate-100">
+            로그아웃
+          </button>
+        </div>
+      </aside>
+
+      <div className="flex w-full flex-col">
+        <header className="border-b border-slate-200 bg-white px-4 py-3 md:px-8">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {/* 햄버거 (모바일만) */}
+              <button
+                type="button"
+                onClick={() => setMenuOpen((v) => !v)}
+                className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 md:hidden"
+              >
+                {menuOpen ? (
+                  <span className="text-lg leading-none">✕</span>
+                ) : (
+                  <span className="flex flex-col gap-1">
+                    <span className="block h-0.5 w-5 bg-slate-600" />
+                    <span className="block h-0.5 w-5 bg-slate-600" />
+                    <span className="block h-0.5 w-5 bg-slate-600" />
+                  </span>
+                )}
+                {unread > 0 && !menuOpen ? (
+                  <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
+                ) : null}
+              </button>
+              <div>
+                <h1 className="text-lg font-bold text-seum-navy">{current?.label}</h1>
+                <p className="text-xs text-slate-400">{profile?.name}님</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => (window.location.href = "/home")} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50">홈으로</button>
+              <button onClick={handleLogout} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 md:hidden">로그아웃</button>
+            </div>
+          </div>
+        </header>
+
+        {/* 모바일: 햄버거 펼침 메뉴 */}
         {menuOpen ? (
-          <div className="border-t border-slate-100 px-4 py-2 md:hidden">
+          <nav className="border-b border-slate-200 bg-white px-4 py-2 md:hidden">
             {MENUS.map((m) => (
               <button
                 key={m.key}
                 onClick={() => { setActive(m.key); setMenuOpen(false); }}
-                className={`mb-1 flex w-full items-center justify-between rounded-lg px-4 py-2.5 text-left text-sm font-medium transition ${active === m.key ? "bg-seum-blue text-white" : "text-slate-600 hover:bg-slate-100"
-                  }`}
+                className={`mb-1 flex w-full items-center justify-between rounded-lg px-4 py-2.5 text-left text-sm font-medium transition ${
+                  active === m.key ? "bg-seum-blue text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
               >
                 <span>{m.label}</span>
                 {m.key === "notifications" && unread > 0 ? (
@@ -255,89 +379,13 @@ export default function StudentLayout() {
                 ) : null}
               </button>
             ))}
-          </div>
+          </nav>
         ) : null}
-      </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-6">
-        {locked && (
-          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-100 px-4 py-3">
-            <p className="text-sm font-bold text-slate-700">수강이 종료되었습니다</p>
-            <p className="mt-0.5 text-xs text-slate-500">지난 자료는 계속 확인하실 수 있지만, 새로운 제출·전송은 재등록 후 이용하실 수 있습니다.</p>
-          </div>
-        )}
-
-        {active === "courses" && (
-          <div>
-            <h2 className="mb-3 font-bold text-seum-navy">수강 현황</h2>
-            {loading ? (
-              <p className="text-slate-400">불러오는 중...</p>
-            ) : enrollments.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
-                아직 수강 중인 반이 없습니다.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {enrollments.map((e) => {
-                  const isGroup = e.courses?.type === "group";
-                  const expired = isExpired(e);
-                  return (
-                    <div key={e.id} className={`rounded-xl border border-slate-200 bg-white p-5 ${expired ? "opacity-60" : ""}`}>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-bold text-seum-navy">
-                            {e.courses?.title}
-                            <span className="ml-2 text-xs text-slate-400">{isGroup ? "단체반" : "1:1"}</span>
-                            {expired ? <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">종료</span> : null}
-                          </p>
-                          {e.teacher?.name && (
-                            <p className="mt-1 text-sm text-slate-500">담임 {e.teacher.name}</p>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <p className="text-2xl font-bold text-seum-blue">{e.remaining_sessions}</p>
-                          <p className="text-xs text-slate-400">/ {e.total_sessions}회 남음</p>
-                        </div>
-                      </div>
-
-                      {e.expires_at ? (
-                        <p className="mt-2 text-xs text-slate-400">수강 종료일 {fmtDate(e.expires_at)}</p>
-                      ) : null}
-
-                      {isGroup && (
-                        <div className="mt-4 space-y-1 border-t border-slate-100 pt-3 text-sm text-slate-600">
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">수업 시간</span>
-                            <span>매주 {WEEKDAYS[e.courses?.weekday]}요일 {e.courses?.start_time?.slice(0, 5)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">개강일</span>
-                            <span>{fmtDate(e.courses?.start_date)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">종료 예정</span>
-                            <span>{endDate(e.courses?.start_date, e.total_sessions) ?? "-"}</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {active === "absence" && <AbsenceRequestTab studentId={profile.id} />}
-        {active === "materials" && <MaterialsTab studentId={profile.id} locked={locked} />}
-        {active === "homework" && <HomeworkTab studentId={profile.id} locked={locked} />}
-        {active === "interview" && <StudentInterviewTab studentId={profile.id} locked={locked} />}
-        {active === "chat" && <ChatTab studentId={profile.id} onRead={loadUnread} locked={locked} />}
-        {active === "payments" && <PaymentsTab studentId={profile.id} />}
-        {active === "notifications" && (
-          <NotificationsTab userId={profile.id} onGoTab={(tab) => setActive(tab)} onRead={loadUnread} />
-        )}
-      </main>
+        <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-6 md:px-8">
+          {renderContent()}
+        </main>
+      </div>
     </div>
   );
 }

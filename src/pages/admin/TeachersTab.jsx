@@ -121,7 +121,7 @@ export default function TeachersTab({ branchId }) {
           아직 지정된 선생님이 없습니다.
         </p>
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {teachers.map((t) => {
             const avail = t.available_branches ?? [];
             return (
@@ -130,14 +130,14 @@ export default function TeachersTab({ branchId }) {
                 className="rounded-xl border border-slate-200 bg-white p-4"
               >
                 <div className="flex items-start justify-between">
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-bold text-seum-navy">{t.name}</p>
                     <p className="text-sm text-slate-500">{t.phone || "-"}</p>
-                    <p className="text-xs text-slate-400">{t.email}</p>
+                    <p className="truncate text-xs text-slate-400">{t.email}</p>
                   </div>
                   <button
                     onClick={() => demote(t.id)}
-                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50"
+                    className="flex-shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50"
                   >
                     해제
                   </button>

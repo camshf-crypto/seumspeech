@@ -4,7 +4,13 @@ import { supabase } from "../../lib/supabase";
 const STORAGE_KEY = "seum_inquiry_id";
 
 const CATEGORIES = [
-  { key: "취업면접", label: "취업·공무원 면접" },
+  { key: "사기업면접", label: "사기업 면접" },
+  { key: "공무원면접", label: "공무원 면접" },
+  { key: "공기업면접", label: "공기업 면접" },
+  { key: "병원면접", label: "병원 면접" },
+  { key: "고입면접", label: "고입 면접" },
+  { key: "대입면접", label: "대입 면접" },
+  { key: "편입면접", label: "편입 면접" },
   { key: "스피치", label: "스피치" },
   { key: "발표불안", label: "발표불안" },
   { key: "보이스", label: "보이스" },
