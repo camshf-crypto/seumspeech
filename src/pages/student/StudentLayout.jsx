@@ -137,7 +137,7 @@ export default function StudentLayout() {
     { key: "absence", label: "결석 신청" },
     { key: "materials", label: "자료 제출함" },
     { key: "homework", label: "숙제" },
-    ...(hasInterview ? [{ key: "interview", label: "면접 수업" }] : []),
+    ...(hasInterview ? [{ key: "interview", label: "나의 면접 수업" }] : []),
     { key: "chat", label: "선생님과 채팅" },
     { key: "payments", label: "결제내역" },
     { key: "notifications", label: "알림" },
