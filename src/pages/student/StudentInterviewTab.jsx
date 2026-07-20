@@ -516,7 +516,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                 : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
             }`}
           >
-            자료집
+            자료집 다운로드
           </button>
         )}
       </div>
