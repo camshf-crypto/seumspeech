@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import {
   getCategory,
@@ -300,6 +300,12 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const [savingId, setSavingId] = useState(null);
   const [loadingQ, setLoadingQ] = useState(false);
 
+  // 자동 저장 상태
+  const [autoSavingIds, setAutoSavingIds] = useState({}); // { [questionId]: true }
+  const [autoSavedIds, setAutoSavedIds] = useState({});   // { [questionId]: true }
+  const questionsRef = useRef(questions);
+  questionsRef.current = questions;
+
   // 1) 배정 로드 (개별 우선 → 없으면 소속 단체반 배정 상속)
   useEffect(() => {
     let alive = true;
@@ -426,26 +432,74 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     return () => { supabase.removeChannel(channel); };
   }, [studentId]);
 
-  const saveAnswer = async (q) => {
-    if (locked) return alert("수강이 종료되어 답변을 저장할 수 없습니다. 재등록 후 이용해주세요.");
-    setSavingId(q.id);
-    const text = answers[q.id] ?? "";
+  // 실제 저장 (수동 / 자동 공용)
+  const persistAnswer = async (questionId, text) => {
     const now = new Date().toISOString();
-
-    // upsert (question_id + student_id unique)
     const { data, error } = await supabase
       .from("interview_answers_v2")
       .upsert(
-        { question_id: q.id, student_id: studentId, student_answer: text, answered_at: now, updated_at: now },
+        { question_id: questionId, student_id: studentId, student_answer: text, answered_at: now, updated_at: now },
         { onConflict: "question_id,student_id" }
       )
       .select()
       .maybeSingle();
+    if (error) throw error;
+    setQuestions((prev) =>
+      prev.map((x) => (x.id === questionId ? { ...x, _answer: { ...(x._answer || {}), ...data } } : x))
+    );
+    return data;
+  };
 
-    setSavingId(null);
-    if (error) return alert("저장 실패: " + error.message);
-    setQuestions((prev) => prev.map((x) => (x.id === q.id ? { ...x, _answer: { ...(x._answer || {}), ...data } } : x)));
-    alert("답변이 저장되어 선생님에게 전달되었습니다.");
+  // 4) 자동 저장 — 입력이 멈추고 1.5초 뒤, 변경된 답변만
+  useEffect(() => {
+    if (locked) return;
+    const timer = setTimeout(async () => {
+      const targets = questionsRef.current.filter((q) => {
+        const text = answers[q.id] ?? "";
+        const saved = q._answer?.student_answer ?? "";
+        return text.trim() !== "" && text !== saved;
+      });
+      if (targets.length === 0) return;
+
+      for (const q of targets) {
+        setAutoSavingIds((p) => ({ ...p, [q.id]: true }));
+        try {
+          await persistAnswer(q.id, answers[q.id] ?? "");
+          setAutoSavedIds((p) => ({ ...p, [q.id]: true }));
+          setTimeout(() => {
+            setAutoSavedIds((p) => {
+              const next = { ...p };
+              delete next[q.id];
+              return next;
+            });
+          }, 2500);
+        } catch (e) {
+          console.error("자동 저장 실패:", e.message);
+        } finally {
+          setAutoSavingIds((p) => {
+            const next = { ...p };
+            delete next[q.id];
+            return next;
+          });
+        }
+      }
+    }, 1500);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line
+  }, [answers, locked, studentId]);
+
+  const saveAnswer = async (q) => {
+    if (locked) return alert("수강이 종료되어 답변을 저장할 수 없습니다. 재등록 후 이용해주세요.");
+    setSavingId(q.id);
+    try {
+      await persistAnswer(q.id, answers[q.id] ?? "");
+      alert("답변이 저장되어 선생님에게 전달되었습니다.");
+    } catch (e) {
+      alert("저장 실패: " + e.message);
+    } finally {
+      setSavingId(null);
+    }
   };
 
   if (loading) return <p className="text-slate-400">불러오는 중...</p>;
@@ -475,7 +529,9 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
           {getCategoryLabel(assignment.category_key)}
           {subLabel && <span className="ml-2 text-seum-blue">· {subLabel}</span>} 면접
         </h2>
-        <p className="text-sm text-slate-400">카테고리별 질문에 답변을 작성하면 선생님이 피드백을 드립니다.</p>
+        <p className="text-sm text-slate-400">
+          답변은 작성 중 자동 저장됩니다. 작성이 끝나면 저장 버튼을 눌러 선생님께 전달하세요.
+        </p>
       </div>
 
       {locked && (
@@ -546,6 +602,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
             const grades = fb ? parseGrades(fb) : null;
             // 차트가 있으면 진단 블록은 텍스트에서 제거
             const fbText = grades ? stripDiagnosis(fb) : fb;
+            const dirty = (answers[q.id] ?? "") !== (a?.student_answer ?? "");
             return (
               <div key={q.id} className="rounded-xl border border-slate-200 bg-white p-4">
                 <p className="mb-2 font-medium text-seum-navy">
@@ -557,11 +614,17 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                   onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
                   rows={4}
                   disabled={locked}
-                  placeholder={locked ? "수강 종료로 답변을 작성할 수 없습니다." : "답변을 작성하세요."}
+                  placeholder={locked ? "수강 종료로 답변을 작성할 수 없습니다." : "답변을 작성하세요. 자동 저장됩니다."}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue disabled:bg-slate-50 disabled:text-slate-400"
                 />
                 <div className="mt-2 flex items-center justify-between">
-                  {a?.answered_at ? (
+                  {autoSavingIds[q.id] ? (
+                    <span className="text-xs text-slate-400">저장 중...</span>
+                  ) : autoSavedIds[q.id] ? (
+                    <span className="text-xs text-blue-600">자동 저장됨</span>
+                  ) : dirty ? (
+                    <span className="text-xs text-amber-500">작성 중</span>
+                  ) : a?.answered_at ? (
                     <span className="text-xs text-green-600">✓ 저장됨</span>
                   ) : (
                     <span className="text-xs text-slate-400">미작성</span>
