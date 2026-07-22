@@ -1,30 +1,26 @@
 // supabase/functions/stt-clova/index.ts
-// 네이버 CLOVA Speech Recognition (CSR) — 단문 음성 인식
+// 네이버 CLOVA Speech (장문 인식) — webm/mp4 등 지원
 
-const CLOVA_ID = Deno.env.get("CLOVA_CSR_ID");
-const CLOVA_SECRET = Deno.env.get("CLOVA_CSR_SECRET");
+const INVOKE_URL = Deno.env.get("CLOVA_SPEECH_INVOKE_URL"); // 예: https://clovaspeech-gw.ncloud.com/external/v1/xxxx/xxxxx
+const SECRET = Deno.env.get("CLOVA_SPEECH_SECRET");
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    if (!CLOVA_ID || !CLOVA_SECRET) {
+    if (!INVOKE_URL || !SECRET) {
       return new Response(
-        JSON.stringify({ success: false, error: "CLOVA 키가 설정되지 않았습니다." }),
+        JSON.stringify({ success: false, error: "CLOVA Speech 설정이 없습니다." }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    // 오디오 바이너리를 그대로 받음
     const audio = await req.arrayBuffer();
     if (!audio || audio.byteLength === 0) {
       return new Response(
@@ -33,24 +29,22 @@ Deno.serve(async (req) => {
       );
     }
 
-    const res = await fetch(
-      "https://naveropenapi.apigw.ntruss.com/recog/v1/stt?lang=Kor",
-      {
-        method: "POST",
-        headers: {
-          "X-NCP-APIGW-API-KEY-ID": CLOVA_ID,
-          "X-NCP-APIGW-API-KEY": CLOVA_SECRET,
-          "Content-Type": "application/octet-stream",
-        },
-        body: audio,
-      },
-    );
+    // multipart/form-data 구성
+    const form = new FormData();
+    const params = { language: "ko-KR", completion: "sync", format: "JSON" };
+    form.append("params", JSON.stringify(params));
+    form.append("media", new Blob([audio]), "audio.webm");
+
+    const res = await fetch(`${INVOKE_URL}/recognizer/upload`, {
+      method: "POST",
+      headers: { "X-CLOVASPEECH-API-KEY": SECRET },
+      body: form,
+    });
 
     const data = await res.json();
-
     if (!res.ok) {
       return new Response(
-        JSON.stringify({ success: false, error: data?.errorMessage || "CLOVA 호출 실패" }),
+        JSON.stringify({ success: false, error: data?.message || JSON.stringify(data) }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
