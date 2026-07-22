@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import DebateSession from "./DebateSession";
 import {
   getCategory,
   getSubLabel,
@@ -19,7 +20,6 @@ const AXES = [
 
 const GRADE_SCORE = { 상: 3, 중: 2, 하: 1 };
 
-// 인쇄용 스타일 — 질문 + 답변만 출력
 const PRINT_CSS = `
 @media print {
   body * { visibility: hidden !important; }
@@ -264,12 +264,67 @@ function FeedbackAccordion({ grades, text }) {
           )}
           {text && (
             <div className="rounded-2xl border-l-2 border-seum-blue bg-blue-50/50 px-4 py-3">
-              <p className="mb-1.5 text-[11px] font-black uppercase tracking-wide text-seum-blue">선생님 첨삭</p>
+              <p className="mb-1.5 text-[11px] font-black uppercase tracking-wide text-seum-blue">첨삭</p>
               <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{text}</p>
             </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function DebateTopicList({ questions, locked, onPick }) {
+  return (
+    <div className="space-y-3">
+      {questions.map((q, i) => {
+        const a = q._answer;
+        const fb = a?.teacher_feedback || "";
+        const grades = fb ? parseGrades(fb) : null;
+        const fbText = grades ? stripDiagnosis(fb) : fb;
+        const done = !!a?.submitted_at;
+
+        return (
+          <div
+            key={q.id}
+            className={`rounded-xl border bg-white p-4 ${done ? "border-green-200" : "border-slate-200"}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <p className="font-medium text-seum-navy">
+                <span className="mr-1 text-slate-400">{i + 1}.</span>
+                {q.question}
+              </p>
+              <button
+                type="button"
+                onClick={() => onPick(q)}
+                disabled={locked}
+                className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-bold transition disabled:opacity-40 ${
+                  done
+                    ? "border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                    : "bg-seum-blue text-white hover:bg-[#2a63c4]"
+                }`}
+              >
+                {done ? "다시 토론" : "토론 시작"}
+              </button>
+            </div>
+
+            {done && <p className="mt-2 text-xs font-bold text-green-600">✓ 토론 완료</p>}
+
+            {a?.student_answer && (
+              <details className="mt-3">
+                <summary className="cursor-pointer text-xs font-bold text-slate-500 hover:text-slate-700">
+                  토론 기록 보기
+                </summary>
+                <p className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2.5 text-sm leading-relaxed text-slate-700">
+                  {a.student_answer}
+                </p>
+              </details>
+            )}
+
+            {fb ? <FeedbackAccordion grades={grades} text={fbText} /> : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -285,6 +340,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const [loadingQ, setLoadingQ] = useState(false);
   const [autoSavingIds, setAutoSavingIds] = useState({});
   const [autoSavedIds, setAutoSavedIds] = useState({});
+  const [debateQ, setDebateQ] = useState(null);
   const questionsRef = useRef(questions);
   questionsRef.current = questions;
 
@@ -385,6 +441,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
   useEffect(() => {
     setActiveSeries(null);
+    setDebateQ(null);
   }, [activeTab]);
 
   useEffect(() => {
@@ -430,7 +487,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   };
 
   useEffect(() => {
-    if (locked) return;
+    if (locked || activeTab === "debate") return;
     const timer = setTimeout(async () => {
       const targets = questionsRef.current.filter((q) => {
         const t = answers[q.id] ?? "";
@@ -465,7 +522,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
     return () => clearTimeout(timer);
     // eslint-disable-next-line
-  }, [answers, locked, studentId]);
+  }, [answers, locked, studentId, activeTab]);
 
   const saveAnswer = async (q) => {
     if (locked) return alert("수강이 종료되어 답변을 저장할 수 없습니다. 재등록 후 이용해주세요.");
@@ -502,7 +559,8 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const showSeriesPicker = activeTab === "gichul" && seriesList.length > 0;
   const materials = getMaterials(assignment.category_key, assignment.sub_key);
   const isMaterialsTab = activeTab === "materials";
-  const canPrint = !isMaterialsTab && questions.length > 0;
+  const isDebateTab = activeTab === "debate";
+  const canPrint = !isMaterialsTab && !isDebateTab && questions.length > 0;
 
   const fileUrl = (path) =>
     `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/student-files/${encodeURI(path)}`;
@@ -521,11 +579,154 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const today = new Date();
   const todayStr = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
 
+  const renderBody = () => {
+    if (isMaterialsTab) {
+      return (
+        <div className="space-y-3">
+          {materials.map((m) => (
+            <div
+              key={m.path}
+              onClick={() => window.open(fileUrl(m.path), "_blank")}
+              className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 transition hover:border-seum-blue hover:bg-blue-50/30"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-red-50 text-[11px] font-black text-red-500">
+                  PDF
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate font-bold text-seum-navy">{m.title}</p>
+                  {m.description && <p className="truncate text-xs text-slate-400">{m.description}</p>}
+                </div>
+              </div>
+              <span className="shrink-0 rounded-lg bg-seum-blue px-3 py-1.5 text-xs font-bold text-white">
+                다운로드
+              </span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (isDebateTab) {
+      if (debateQ) {
+        return (
+          <DebateSession
+            question={debateQ}
+            studentId={studentId}
+            existingAnswer={debateQ._answer}
+            onExit={() => setDebateQ(null)}
+            onSaved={() => {
+              setDebateQ(null);
+              loadTab(assignment.category_key, assignment.sub_key, activeTab, activeSeries);
+            }}
+          />
+        );
+      }
+      if (loadingQ) return <p className="py-10 text-center text-slate-400">불러오는 중...</p>;
+      if (questions.length === 0) {
+        return (
+          <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
+            등록된 토론 주제가 아직 없습니다.
+          </p>
+        );
+      }
+      return <DebateTopicList questions={questions} locked={locked} onPick={setDebateQ} />;
+    }
+
+    if (loadingQ) return <p className="py-10 text-center text-slate-400">불러오는 중...</p>;
+
+    if (questions.length === 0) {
+      return (
+        <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
+          {showSeriesPicker && !activeSeries
+            ? "직렬을 선택하면 해당 직렬의 기출문제가 표시됩니다."
+            : "이 탭에 등록된 질문이 아직 없습니다."}
+        </p>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {questions.map((q, i) => {
+          const a = q._answer;
+          const fb = a?.teacher_feedback || "";
+          const grades = fb ? parseGrades(fb) : null;
+          const fbText = grades ? stripDiagnosis(fb) : fb;
+          const t = answers[q.id] ?? "";
+          const dirty = t !== (a?.student_answer ?? "");
+          const submitted = !!a?.submitted_at && !dirty && !!t.trim();
+
+          return (
+            <div
+              key={q.id}
+              className={`print-card rounded-xl border bg-white p-4 transition ${
+                submitted ? "border-green-200" : "border-slate-200"
+              }`}
+            >
+              <p className="mb-2 font-medium text-seum-navy">
+                <span className="mr-1 text-slate-400">{i + 1}.</span>
+                {q.question}
+              </p>
+
+              <textarea
+                value={t}
+                onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
+                rows={4}
+                disabled={locked}
+                placeholder={locked ? "수강 종료로 답변을 작성할 수 없습니다." : "답변을 작성하세요. 자동 저장됩니다."}
+                className="no-print w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue disabled:bg-slate-50 disabled:text-slate-400"
+              />
+
+              <div className="print-only print-answer">{t || " "}</div>
+
+              <div className="no-print mt-2 flex items-center justify-between gap-2">
+                {submitted ? (
+                  <span className="text-xs font-bold text-green-600">✓ 선생님께 전달됨</span>
+                ) : autoSavingIds[q.id] ? (
+                  <span className="text-xs text-slate-400">저장 중...</span>
+                ) : autoSavedIds[q.id] ? (
+                  <span className="text-xs text-blue-600">임시 저장됨 — 저장을 눌러 전달하세요</span>
+                ) : t.trim() ? (
+                  <span className="text-xs text-amber-500">
+                    {a?.submitted_at ? "수정됨 — 다시 전달하세요" : "저장을 눌러 선생님께 전달하세요"}
+                  </span>
+                ) : (
+                  <span className="text-xs text-slate-400">미작성</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => saveAnswer(q)}
+                  disabled={savingId === q.id || locked || submitted}
+                  className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
+                    submitted ? "cursor-default bg-green-600" : "bg-seum-blue hover:bg-[#2a63c4]"
+                  }`}
+                >
+                  {savingId === q.id
+                    ? "저장 중..."
+                    : submitted
+                    ? "✓ 전달 완료"
+                    : a?.submitted_at
+                    ? "다시 전달"
+                    : "저장"}
+                </button>
+              </div>
+
+              {fb ? (
+                <FeedbackAccordion grades={grades} text={fbText} />
+              ) : submitted ? (
+                <p className="no-print mt-3 text-xs text-slate-400">선생님 피드백을 기다리는 중이에요.</p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div id="itv-print">
       <style>{PRINT_CSS}</style>
 
-      {/* 인쇄 전용 헤더 */}
       <div className="print-only" style={{ marginBottom: 16, borderBottom: "2px solid #1e293b", paddingBottom: 8 }}>
         <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>{printTitle()}</div>
         <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>세움스피치 · 출력일 {todayStr}</div>
@@ -539,6 +740,8 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
         <p className="text-sm text-slate-400">
           {isMaterialsTab
             ? "면접 준비에 필요한 자료를 다운로드하세요."
+            : isDebateTab
+            ? "주제를 선택하면 AI 상대와 실전처럼 토론합니다."
             : "작성 중인 내용은 자동 저장됩니다. 저장 버튼을 눌러야 선생님께 전달됩니다."}
         </p>
       </div>
@@ -619,115 +822,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
         </div>
       )}
 
-      {isMaterialsTab ? (
-        <div className="space-y-3">
-          {materials.map((m) => (
-            <div
-              key={m.path}
-              onClick={() => window.open(fileUrl(m.path), "_blank")}
-              className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 transition hover:border-seum-blue hover:bg-blue-50/30"
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-red-50 text-[11px] font-black text-red-500">
-                  PDF
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate font-bold text-seum-navy">{m.title}</p>
-                  {m.description && <p className="truncate text-xs text-slate-400">{m.description}</p>}
-                </div>
-              </div>
-              <span className="shrink-0 rounded-lg bg-seum-blue px-3 py-1.5 text-xs font-bold text-white">
-                다운로드
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : loadingQ ? (
-        <p className="py-10 text-center text-slate-400">불러오는 중...</p>
-      ) : questions.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
-          {showSeriesPicker && !activeSeries
-            ? "직렬을 선택하면 해당 직렬의 기출문제가 표시됩니다."
-            : "이 탭에 등록된 질문이 아직 없습니다."}
-        </p>
-      ) : (
-        <div className="space-y-4">
-          {questions.map((q, i) => {
-            const a = q._answer;
-            const fb = a?.teacher_feedback || "";
-            const grades = fb ? parseGrades(fb) : null;
-            const fbText = grades ? stripDiagnosis(fb) : fb;
-            const t = answers[q.id] ?? "";
-            const dirty = t !== (a?.student_answer ?? "");
-            const submitted = !!a?.submitted_at && !dirty && !!t.trim();
-
-            return (
-              <div
-                key={q.id}
-                className={`print-card rounded-xl border bg-white p-4 transition ${
-                  submitted ? "border-green-200" : "border-slate-200"
-                }`}
-              >
-                <p className="mb-2 font-medium text-seum-navy">
-                  <span className="mr-1 text-slate-400">{i + 1}.</span>
-                  {q.question}
-                </p>
-
-                {/* 화면용 입력 */}
-                <textarea
-                  value={t}
-                  onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
-                  rows={4}
-                  disabled={locked}
-                  placeholder={locked ? "수강 종료로 답변을 작성할 수 없습니다." : "답변을 작성하세요. 자동 저장됩니다."}
-                  className="no-print w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue disabled:bg-slate-50 disabled:text-slate-400"
-                />
-
-                {/* 인쇄용 답변 */}
-                <div className="print-only print-answer">{t || " "}</div>
-
-                <div className="no-print mt-2 flex items-center justify-between gap-2">
-                  {submitted ? (
-                    <span className="text-xs font-bold text-green-600">✓ 선생님께 전달됨</span>
-                  ) : autoSavingIds[q.id] ? (
-                    <span className="text-xs text-slate-400">저장 중...</span>
-                  ) : autoSavedIds[q.id] ? (
-                    <span className="text-xs text-blue-600">임시 저장됨 — 저장을 눌러 전달하세요</span>
-                  ) : t.trim() ? (
-                    <span className="text-xs text-amber-500">
-                      {a?.submitted_at ? "수정됨 — 다시 전달하세요" : "저장을 눌러 선생님께 전달하세요"}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-slate-400">미작성</span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => saveAnswer(q)}
-                    disabled={savingId === q.id || locked || submitted}
-                    className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
-                      submitted ? "cursor-default bg-green-600" : "bg-seum-blue hover:bg-[#2a63c4]"
-                    }`}
-                  >
-                    {savingId === q.id
-                      ? "저장 중..."
-                      : submitted
-                      ? "✓ 전달 완료"
-                      : a?.submitted_at
-                      ? "다시 전달"
-                      : "저장"}
-                  </button>
-                </div>
-
-                {fb ? (
-                  <FeedbackAccordion grades={grades} text={fbText} />
-                ) : submitted ? (
-                  <p className="no-print mt-3 text-xs text-slate-400">선생님 피드백을 기다리는 중이에요.</p>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {renderBody()}
     </div>
   );
 }
