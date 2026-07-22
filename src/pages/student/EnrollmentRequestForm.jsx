@@ -44,6 +44,7 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
       lesson_detail: lessonDetail || null,
       visit_path: visitPath || null,
       privacy_agree: agree,
+      terms_agree: termsAgree,
       status: "pending",
     });
 
@@ -68,70 +69,141 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
         <p className="mt-1 text-sm text-slate-400">아래 항목을 작성하시면 원장 승인 후 이용하실 수 있습니다.</p>
       </div>
 
-      <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6">
-        {/* 기본 정보 */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        {/* 성명 + 성별 */}
+        <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">성명 *</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              성명 <span className="text-red-500">*</span>
+            </label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="성명"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
+            />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">성별</label>
+            <label className="mb-1 block text-sm font-medium text-slate-600">성별</label>
             <div className="flex gap-2">
               {GENDERS.map((g) => (
-                <button key={g} type="button" onClick={() => setGender(g)}
-                  className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${gender === g ? "border-seum-blue bg-blue-50 text-seum-blue" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}>
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => setGender(g)}
+                  className={`flex-1 rounded-lg border py-2.5 text-sm font-medium transition ${
+                    gender === g
+                      ? "border-seum-blue bg-seum-blue text-white"
+                      : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
                   {g}
                 </button>
               ))}
             </div>
           </div>
+        </div>
+
+        {/* 전화번호 + 생년월일 */}
+        <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">전화번호 *</label>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="010-0000-0000" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              전화번호 <span className="text-red-500">*</span>
+            </label>
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="010-0000-0000"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
+            />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">생년월일</label>
-            <input type="date" value={birth} onChange={(e) => setBirth(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">이메일</label>
-            <input value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">주소 (동까지)</label>
-            <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="예: 강서구 마곡동" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
+            <label className="mb-1 block text-sm font-medium text-slate-600">생년월일</label>
+            <input
+              type="date"
+              value={birth}
+              onChange={(e) => setBirth(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-600 outline-none focus:border-seum-blue"
+            />
           </div>
         </div>
 
-        {/* 지점 */}
-        {branches.length > 0 && (
+        {/* 이메일 + 주소 */}
+        <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">희망 지점</label>
-            <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue">
-              <option value="">지점 선택...</option>
-              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+            <label className="mb-1 block text-sm font-medium text-slate-600">이메일</label>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="example@email.com"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
+            />
           </div>
-        )}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-600">주소 (동까지)</label>
+            <input
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="예: 강서구 마곡동"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
+            />
+          </div>
+        </div>
+
+        {/* 희망 지점 */}
+        <div className="mb-4">
+          <label className="mb-1 block text-sm font-medium text-slate-600">희망 지점</label>
+          <select
+            value={branchId}
+            onChange={(e) => setBranchId(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-600 outline-none focus:border-seum-blue"
+          >
+            <option value="">지점 선택...</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
+        </div>
 
         {/* 수강 형태 */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">수강 형태</label>
-          <div className="mb-2 flex gap-2">
-            <button type="button" onClick={() => { setLessonType("oneonone"); setLessonDetail(""); }}
-              className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${lessonType === "oneonone" ? "border-seum-blue bg-blue-50 text-seum-blue" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}>
+        <div className="mb-4">
+          <label className="mb-2 block text-sm font-medium text-slate-600">수강 형태</label>
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => { setLessonType("oneonone"); setLessonDetail(""); }}
+              className={`rounded-lg border py-3 text-sm font-bold transition ${
+                lessonType === "oneonone"
+                  ? "border-seum-blue bg-blue-50 text-seum-blue"
+                  : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
               1:1 개인레슨
             </button>
-            <button type="button" onClick={() => { setLessonType("group"); setLessonDetail(""); }}
-              className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${lessonType === "group" ? "border-seum-blue bg-blue-50 text-seum-blue" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}>
+            <button
+              type="button"
+              onClick={() => { setLessonType("group"); setLessonDetail(""); }}
+              className={`rounded-lg border py-3 text-sm font-bold transition ${
+                lessonType === "group"
+                  ? "border-seum-blue bg-blue-50 text-seum-blue"
+                  : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
               단체반
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
             {details.map((d) => (
-              <button key={d} type="button" onClick={() => setLessonDetail(d)}
-                className={`rounded-lg border px-3 py-1.5 text-sm transition ${lessonDetail === d ? "border-seum-blue bg-blue-50 text-seum-blue" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}>
+              <button
+                key={d}
+                type="button"
+                onClick={() => setLessonDetail(d)}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+                  lessonDetail === d
+                    ? "border-seum-blue bg-seum-blue text-white"
+                    : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
                 {d}
               </button>
             ))}
@@ -139,76 +211,84 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
         </div>
 
         {/* 방문 경로 */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">방문 경로</label>
+        <div className="mb-6">
+          <label className="mb-2 block text-sm font-medium text-slate-600">방문 경로</label>
           <div className="flex flex-wrap gap-2">
             {VISIT_PATHS.map((v) => (
-              <button key={v} type="button" onClick={() => setVisitPath(v)}
-                className={`rounded-lg border px-3 py-1.5 text-sm transition ${visitPath === v ? "border-seum-blue bg-blue-50 text-seum-blue" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}>
+              <button
+                key={v}
+                type="button"
+                onClick={() => setVisitPath(v)}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+                  visitPath === v
+                    ? "border-seum-blue bg-seum-blue text-white"
+                    : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
                 {v}
               </button>
             ))}
           </div>
         </div>
 
-        {/* 개인정보 동의 */}
-        <div className="rounded-lg bg-slate-50 p-4">
-          <p className="mb-2 text-xs font-bold text-slate-600">개인정보 수집 및 이용 동의</p>
-          <p className="text-xs leading-relaxed text-slate-500">
-            세움스피치는 수강 목적의 회원 가입 신청 접수와 관련하여 필요한 개인정보(성명, 전화번호, 주소, 이메일 등)를 수집합니다.
-            민감한 개인정보는 수집하거나 목적 외로 사용하지 않습니다.
+        {/* 개인정보 수집·이용 동의 */}
+        <div className="mb-3 rounded-xl bg-slate-50 p-4">
+          <p className="mb-1.5 text-sm font-bold text-slate-700">개인정보 수집 및 이용 동의</p>
+          <p className="mb-3 text-xs leading-relaxed text-slate-500">
+            세움스피치는 수강 목적의 회원 가입 신청 접수와 관련하여 필요한 개인정보(성명, 전화번호, 주소, 이메일 등)를 수집합니다. 민감한 개인정보는 수집하거나 목적 외로 사용하지 않습니다.
           </p>
-          <label className="mt-3 flex cursor-pointer items-center gap-2">
-            <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
-            <span className="text-sm font-medium text-slate-700">개인정보 수집 및 이용에 동의합니다. *</span>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={agree}
+              onChange={(e) => setAgree(e.target.checked)}
+              className="h-4 w-4 accent-seum-blue"
+            />
+            <span className="text-sm text-slate-700">
+              개인정보 수집 및 이용에 동의합니다. <span className="text-red-500">*</span>
+            </span>
           </label>
         </div>
 
-        {/* 이용약관·환불규정 */}
-        <div className="rounded-lg bg-slate-50 p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-bold text-slate-600">세움스피치 이용약관 · 환불규정</p>
-            <button type="button" onClick={() => setShowTerms((v) => !v)} className="text-xs font-medium text-seum-blue hover:underline">
-              {showTerms ? "접기" : "전문 보기"}
+        {/* 이용약관·환불규정 동의 */}
+        <div className="mb-6 rounded-xl bg-slate-50 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm font-bold text-slate-700">세움스피치 이용약관·환불규정</p>
+            <button
+              type="button"
+              onClick={() => setShowTerms((v) => !v)}
+              className="text-xs font-semibold text-seum-blue"
+            >
+              {showTerms ? "닫기" : "전문 보기"}
             </button>
           </div>
-
           {showTerms && (
-            <div className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-600">
-              <p className="font-bold text-slate-700">제1조 (목적)</p>
-              <p className="mb-2">세움스피치 "회사"가 제공하는 수강목적(이하 "서비스")의 가입 조건 및 이용에 관한 제반 사항과 기타 필요한 사항을 규정함을 목적으로 합니다.</p>
-
-              <p className="font-bold text-slate-700">제2조 (이용약관의 효력 및 변경)</p>
-              <p className="mb-2">이 약관은 세움스피치 홈페이지에 공시함으로써 효력이 발생합니다. 회사는 합리적인 사유가 발생할 경우 약관을 변경할 수 있으며, 변경된 약관은 적용일·개정 사유 등을 명시하여 최소 7일 전에 공시합니다.</p>
-
-              <p className="font-bold text-slate-700">제3조 (약관 외 준칙)</p>
-              <p className="mb-2">이 약관에 명시되지 않은 사항은 관계 법령에 규정이 있을 경우 그 규정에 따르며, 그렇지 않은 경우 일반적인 관례에 따릅니다.</p>
-
-              <p className="font-bold text-slate-700">제4조 (환불규정)</p>
-              <p className="mb-2">학원의 설립·운영 및 과외교습에 관한 법률 제18조 및 동법 시행령 별표4 기준에 따라 실시합니다.</p>
-
-              <p className="font-bold text-slate-700">제5조 (시설이용 및 휴관)</p>
-              <p className="mb-2">이용시간은 평일 10:00~21:00, 토요일 10:00~20:00입니다. (단 상황에 따라 조정될 수 있습니다.)</p>
-
-              <p className="font-bold text-slate-700">제6조 (강의)</p>
-              <p className="mb-2">수업 전날 밤 12시까지 불참을 통보하지 않으면 수업 횟수가 차감됩니다. 수업시간 내 녹음은 불가하며, 수업에 방해되는 행동 시 퇴실 조치될 수 있습니다.</p>
-
-              <p className="font-bold text-slate-700">제7조 (저작권)</p>
-              <p className="mb-2">수업 교재의 저작권은 세움스피치에 귀속됩니다. 수강생은 서비스를 통해 취득한 정보를 임의 가공·판매하는 등 상업적으로 사용할 수 없습니다.</p>
-
-              <p className="font-bold text-slate-700">제8조 (손해배상)</p>
-              <p>세움스피치는 무료로 제공되는 서비스와 관련하여 개인정보취급방침에서 정하는 내용에 해당되지 않는 사항에 대해서는 어떠한 손해도 책임지지 않습니다.</p>
-            </div>
+            <p className="mb-3 whitespace-pre-line border-b border-slate-200 pb-3 text-xs leading-relaxed text-slate-500">
+              1. 수강료는 등록 시 납부하며, 환불은 학원의 설립·운영 및 과외교습에 관한 법률 시행령에 따른 환불 규정을 따릅니다.
+              2. 수강 시작 전 환불은 전액, 수강 시작 후에는 경과 기간에 따라 잔여 수강료를 환불합니다.
+              3. 학습 자료 및 콘텐츠의 무단 복제·배포를 금합니다.
+              4. 회원의 귀책 사유로 인한 불이익에 대해 학원은 책임지지 않습니다.
+            </p>
           )}
-
-          <label className="mt-3 flex cursor-pointer items-center gap-2">
-            <input type="checkbox" checked={termsAgree} onChange={(e) => setTermsAgree(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
-            <span className="text-sm font-medium text-slate-700">이용약관 및 환불규정에 동의합니다. *</span>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={termsAgree}
+              onChange={(e) => setTermsAgree(e.target.checked)}
+              className="h-4 w-4 accent-seum-blue"
+            />
+            <span className="text-sm text-slate-700">
+              이용약관 및 환불규정에 동의합니다. <span className="text-red-500">*</span>
+            </span>
           </label>
         </div>
 
-        <button type="button" onClick={submit} disabled={saving}
-          className="w-full rounded-lg bg-seum-blue py-3 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={saving || !agree || !termsAgree}
+          className="w-full rounded-lg bg-seum-blue py-3.5 font-bold text-white hover:bg-[#2a63c4] disabled:cursor-not-allowed disabled:opacity-50"
+        >
           {saving ? "신청 중..." : "가입 신청하기"}
         </button>
       </div>

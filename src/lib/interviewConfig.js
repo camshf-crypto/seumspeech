@@ -99,6 +99,8 @@ export const GOV_SERIES = {
     { key: "tomok", label: "토목" },
     { key: "semu", label: "세무" },
     { key: "ganho", label: "간호" },
+    { key: "bogeon", label: "보건" },
+    { key: "unjeon", label: "운전" },
   ],
   seoul: [],
 };

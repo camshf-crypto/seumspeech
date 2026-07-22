@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import DebateSession from "./DebateSession";
 import {
   getCategory,
   getSubLabel,
@@ -19,7 +20,6 @@ const AXES = [
 
 const GRADE_SCORE = { 상: 3, 중: 2, 하: 1 };
 
-// 인쇄용 스타일 — 질문 + 답변만 출력
 const PRINT_CSS = `
 @media print {
   body * { visibility: hidden !important; }
@@ -264,7 +264,7 @@ function FeedbackAccordion({ grades, text }) {
           )}
           {text && (
             <div className="rounded-2xl border-l-2 border-seum-blue bg-blue-50/50 px-4 py-3">
-              <p className="mb-1.5 text-[11px] font-black uppercase tracking-wide text-seum-blue">선생님 첨삭</p>
+              <p className="mb-1.5 text-[11px] font-black uppercase tracking-wide text-seum-blue">AI 첨삭</p>
               <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{text}</p>
             </div>
           )}
@@ -285,6 +285,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const [loadingQ, setLoadingQ] = useState(false);
   const [autoSavingIds, setAutoSavingIds] = useState({});
   const [autoSavedIds, setAutoSavedIds] = useState({});
+  const [debateQ, setDebateQ] = useState(null);   // 토론 진행 중인 주제
   const questionsRef = useRef(questions);
   questionsRef.current = questions;
 
@@ -385,6 +386,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
   useEffect(() => {
     setActiveSeries(null);
+    setDebateQ(null);
   }, [activeTab]);
 
   useEffect(() => {
@@ -430,7 +432,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   };
 
   useEffect(() => {
-    if (locked) return;
+    if (locked || activeTab === "debate") return;
     const timer = setTimeout(async () => {
       const targets = questionsRef.current.filter((q) => {
         const t = answers[q.id] ?? "";
@@ -465,7 +467,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
     return () => clearTimeout(timer);
     // eslint-disable-next-line
-  }, [answers, locked, studentId]);
+  }, [answers, locked, studentId, activeTab]);
 
   const saveAnswer = async (q) => {
     if (locked) return alert("수강이 종료되어 답변을 저장할 수 없습니다. 재등록 후 이용해주세요.");
@@ -502,7 +504,8 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const showSeriesPicker = activeTab === "gichul" && seriesList.length > 0;
   const materials = getMaterials(assignment.category_key, assignment.sub_key);
   const isMaterialsTab = activeTab === "materials";
-  const canPrint = !isMaterialsTab && questions.length > 0;
+  const isDebateTab = activeTab === "debate";
+  const canPrint = !isMaterialsTab && !isDebateTab && questions.length > 0;
 
   const fileUrl = (path) =>
     `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/student-files/${encodeURI(path)}`;
@@ -525,7 +528,6 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     <div id="itv-print">
       <style>{PRINT_CSS}</style>
 
-      {/* 인쇄 전용 헤더 */}
       <div className="print-only" style={{ marginBottom: 16, borderBottom: "2px solid #1e293b", paddingBottom: 8 }}>
         <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>{printTitle()}</div>
         <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>세움스피치 · 출력일 {todayStr}</div>
@@ -539,6 +541,8 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
         <p className="text-sm text-slate-400">
           {isMaterialsTab
             ? "면접 준비에 필요한 자료를 다운로드하세요."
+            : isDebateTab
+            ? "주제를 선택하면 AI 상대와 실전처럼 토론합니다."
             : "작성 중인 내용은 자동 저장됩니다. 저장 버튼을 눌러야 선생님께 전달됩니다."}
         </p>
       </div>
@@ -619,6 +623,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
         </div>
       )}
 
+      {/* ── 자료집 ── */}
       {isMaterialsTab ? (
         <div className="space-y-3">
           {materials.map((m) => (
@@ -642,6 +647,84 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
             </div>
           ))}
         </div>
+
+      /* ── 토론: 세션 진행 중 ── */
+      ) : isDebateTab && debateQ ? (
+        <DebateSession
+          question={debateQ}
+          studentId={studentId}
+          existingAnswer={debateQ._answer}
+          onExit={() => setDebateQ(null)}
+          onSaved={() => {
+            setDebateQ(null);
+            loadTab(assignment.category_key, assignment.sub_key, activeTab, activeSeries);
+          }}
+        />
+
+      /* ── 토론: 주제 목록 ── */
+      ) : isDebateTab ? (
+        loadingQ ? (
+          <p className="py-10 text-center text-slate-400">불러오는 중...</p>
+        ) : questions.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
+            등록된 토론 주제가 아직 없습니다.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {questions.map((q, i) => {
+              const a = q._answer;
+              const fb = a?.teacher_feedback || "";
+              const grades = fb ? parseGrades(fb) : null;
+              const fbText = grades ? stripDiagnosis(fb) : fb;
+              const done = !!a?.submitted_at;
+
+              return (
+                <div
+                  key={q.id}
+                  className={`rounded-xl border bg-white p-4 ${done ? "border-green-200" : "border-slate-200"}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="font-medium text-seum-navy">
+                      <span className="mr-1 text-slate-400">{i + 1}.</span>
+                      {q.question}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setDebateQ(q)}
+                      disabled={locked}
+                      className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-bold transition disabled:opacity-40 ${
+                        done
+                          ? "border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                          : "bg-seum-blue text-white hover:bg-[#2a63c4]"
+                      }`}
+                    >
+                      {done ? "다시 토론" : "토론 시작"}
+                    </button>
+                  </div>
+
+                  {done && (
+                    <p className="mt-2 text-xs font-bold text-green-600">✓ 토론 완료</p>
+                  )}
+
+                  {a?.student_answer && (
+                    <details className="mt-3">
+                      <summary className="cursor-pointer text-xs font-bold text-slate-500 hover:text-slate-700">
+                        토론 기록 보기
+                      </summary>
+                      <p className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2.5 text-sm leading-relaxed text-slate-700">
+                        {a.student_answer}
+                      </p>
+                    </details>
+                  )}
+
+                  {fb ? <FeedbackAccordion grades={grades} text={fbText} /> : null}
+                </div>
+              );
+            })}
+          </div>
+        )
+
+      /* ── 일반 탭 ── */
       ) : loadingQ ? (
         <p className="py-10 text-center text-slate-400">불러오는 중...</p>
       ) : questions.length === 0 ? (
@@ -673,7 +756,6 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                   {q.question}
                 </p>
 
-                {/* 화면용 입력 */}
                 <textarea
                   value={t}
                   onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
@@ -683,7 +765,6 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                   className="no-print w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue disabled:bg-slate-50 disabled:text-slate-400"
                 />
 
-                {/* 인쇄용 답변 */}
                 <div className="print-only print-answer">{t || " "}</div>
 
                 <div className="no-print mt-2 flex items-center justify-between gap-2">
