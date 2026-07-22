@@ -447,7 +447,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   useEffect(() => {
     if (!studentId) return;
     const channel = supabase
-      .channel(`iav2-${studentId}`)
+      .channel(`iav2-${studentId}-${Date.now()}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "interview_answers_v2", filter: `student_id=eq.${studentId}` },
