@@ -101,6 +101,9 @@ export const GOV_SERIES = {
     { key: "ganho", label: "간호" },
     { key: "bogeon", label: "보건" },
     { key: "unjeon", label: "운전" },
+    { key: "sahoebokji", label: "사회복지" },
+    { key: "hwagong", label: "화공" },
+    { key: "jeonsan", label: "전산" },
   ],
   seoul: [],
 };

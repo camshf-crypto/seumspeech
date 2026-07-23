@@ -284,6 +284,10 @@ function DebateTopicList({ questions, locked, onPick }) {
         const fbText = grades ? stripDiagnosis(fb) : fb;
         const done = !!a?.submitted_at;
 
+        // 찬반형 / 토의형 구분 (debate_type 없으면 토의형)
+        const isProsCons = q.debate_type === "pros_cons";
+        const label = isProsCons ? "토론" : "토의";
+
         return (
           <div
             key={q.id}
@@ -292,6 +296,13 @@ function DebateTopicList({ questions, locked, onPick }) {
             <div className="flex items-start justify-between gap-3">
               <p className="font-medium text-seum-navy">
                 <span className="mr-1 text-slate-400">{i + 1}.</span>
+                <span
+                  className={`mr-1.5 inline-block rounded px-1.5 py-0.5 align-middle text-[10px] font-bold ${
+                    isProsCons ? "bg-blue-50 text-seum-blue" : "bg-emerald-50 text-emerald-600"
+                  }`}
+                >
+                  {isProsCons ? "찬반" : "토의"}
+                </span>
                 {q.question}
               </p>
               <button
@@ -304,16 +315,16 @@ function DebateTopicList({ questions, locked, onPick }) {
                     : "bg-seum-blue text-white hover:bg-[#2a63c4]"
                 }`}
               >
-                {done ? "다시 토론" : "토론 시작"}
+                {done ? `다시 ${label}` : `${label} 시작`}
               </button>
             </div>
 
-            {done && <p className="mt-2 text-xs font-bold text-green-600">✓ 토론 완료</p>}
+            {done && <p className="mt-2 text-xs font-bold text-green-600">✓ {label} 완료</p>}
 
             {a?.student_answer && (
               <details className="mt-3">
                 <summary className="cursor-pointer text-xs font-bold text-slate-500 hover:text-slate-700">
-                  토론 기록 보기
+                  {label} 기록 보기
                 </summary>
                 <p className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2.5 text-sm leading-relaxed text-slate-700">
                   {a.student_answer}
@@ -626,7 +637,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       if (questions.length === 0) {
         return (
           <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
-            등록된 토론 주제가 아직 없습니다.
+            등록된 토론·토의 주제가 아직 없습니다.
           </p>
         );
       }
@@ -741,7 +752,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
           {isMaterialsTab
             ? "면접 준비에 필요한 자료를 다운로드하세요."
             : isDebateTab
-            ? "주제를 선택하면 AI 상대와 실전처럼 토론합니다."
+            ? "주제를 선택하면 AI와 실전처럼 토론·토의합니다."
             : "작성 중인 내용은 자동 저장됩니다. 저장 버튼을 눌러야 선생님께 전달됩니다."}
         </p>
       </div>
