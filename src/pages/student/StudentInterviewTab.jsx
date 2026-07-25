@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import DebateSession from "./DebateSession";
+import UnivQuestionPicker from "./UnivQuestionPicker";
+import Simulation from "./Simulation";
+import MajorQuestions from "./MajorQuestions";
 import {
   getCategory,
   getSubLabel,
@@ -352,8 +355,16 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const [autoSavingIds, setAutoSavingIds] = useState({});
   const [autoSavedIds, setAutoSavedIds] = useState({});
   const [debateQ, setDebateQ] = useState(null);
+
+  // 대입 기출: 학교 / 학과 / 전형 선택값
+  const [univPick, setUnivPick] = useState(null);
+
   const questionsRef = useRef(questions);
   questionsRef.current = questions;
+
+  // 대입은 univ_answers, 그 외는 interview_answers_v2에 답변을 저장한다.
+  const isUnivCat = assignment?.category_key === "univ";
+  const answerTable = isUnivCat ? "univ_answers" : "interview_answers_v2";
 
   useEffect(() => {
     let alive = true;
@@ -374,7 +385,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
           .eq("student_id", studentId);
         const itvCourse = (enr ?? [])
           .map((e) => e.courses)
-          .find((c) => c && c.type === "group" && c.course_kind === "interview" && c.interview_category);
+          .find((c) => c && c.course_kind === "interview" && c.interview_category);
         if (itvCourse) {
           resolved = { category_key: itvCourse.interview_category, sub_key: itvCourse.interview_sub };
         }
@@ -391,10 +402,68 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     return () => { alive = false; };
   }, [studentId]);
 
-  const loadTab = async (categoryKey, subKey, tabKey, seriesKey) => {
-    if (tabKey === "materials") {
+  // 답변 맵을 붙여 반환 (카테고리에 따라 답변 테이블이 다름)
+  const attachAnswers = async (questionList) => {
+    const ids = questionList.map((x) => x.id);
+    let answerMap = {};
+    if (ids.length > 0) {
+      const { data: ans } = await supabase
+        .from(answerTable)
+        .select("*")
+        .eq("student_id", studentId)
+        .in("question_id", ids);
+      (ans ?? []).forEach((a) => { answerMap[a.question_id] = a; });
+    }
+    return questionList.map((qq) => ({ ...qq, _answer: answerMap[qq.id] || null }));
+  };
+
+  const applyQuestions = (merged) => {
+    setQuestions(merged);
+    setAnswers((prev) => {
+      const next = { ...prev };
+      merged.forEach((qq) => {
+        if (next[qq.id] === undefined) next[qq.id] = qq._answer?.student_answer ?? "";
+      });
+      return next;
+    });
+  };
+
+  // 대입 기출 (univ_questions) 조회
+  const loadUnivGichul = async (pick) => {
+    if (!pick?.univ || !pick?.major || !pick?.admission) {
       setQuestions([]);
       setLoadingQ(false);
+      return;
+    }
+    setLoadingQ(true);
+    const { data } = await supabase
+      .from("univ_questions")
+      .select("*")
+      .eq("univ", pick.univ)
+      .eq("major", pick.major)
+      .eq("admission", pick.admission)
+      .eq("is_active", true)
+      .order("seq");
+
+    const merged = await attachAnswers(data ?? []);
+    applyQuestions(merged);
+    setLoadingQ(false);
+  };
+
+  const loadTab = async (categoryKey, subKey, tabKey, seriesKey) => {
+    if (
+      tabKey === "materials" ||
+      tabKey === "simulation" ||
+      (categoryKey === "univ" && tabKey === "major")
+    ) {
+      setQuestions([]);
+      setLoadingQ(false);
+      return;
+    }
+
+    // 대입 기출문제는 별도 테이블(univ_questions)에서 조회
+    if (categoryKey === "univ" && tabKey === "gichul") {
+      await loadUnivGichul(univPick);
       return;
     }
 
@@ -419,28 +488,8 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     if (needsSeries) q = q.eq("series_key", seriesKey);
 
     const { data: qs } = await q;
-    const questionList = qs ?? [];
-    const ids = questionList.map((x) => x.id);
-    let answerMap = {};
-
-    if (ids.length > 0) {
-      const { data: ans } = await supabase
-        .from("interview_answers_v2")
-        .select("*")
-        .eq("student_id", studentId)
-        .in("question_id", ids);
-      (ans ?? []).forEach((a) => { answerMap[a.question_id] = a; });
-    }
-
-    const merged = questionList.map((qq) => ({ ...qq, _answer: answerMap[qq.id] || null }));
-    setQuestions(merged);
-    setAnswers((prev) => {
-      const next = { ...prev };
-      merged.forEach((qq) => {
-        if (next[qq.id] === undefined) next[qq.id] = qq._answer?.student_answer ?? "";
-      });
-      return next;
-    });
+    const merged = await attachAnswers(qs ?? []);
+    applyQuestions(merged);
     setLoadingQ(false);
   };
 
@@ -450,6 +499,14 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     // eslint-disable-next-line
   }, [assignment, activeTab, activeSeries, studentId]);
 
+  // 대입 기출: 학교/학과/전형 선택이 바뀌면 재조회
+  useEffect(() => {
+    if (!assignment) return;
+    if (assignment.category_key !== "univ" || activeTab !== "gichul") return;
+    loadUnivGichul(univPick);
+    // eslint-disable-next-line
+  }, [univPick]);
+
   useEffect(() => {
     setActiveSeries(null);
     setDebateQ(null);
@@ -458,10 +515,10 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   useEffect(() => {
     if (!studentId) return;
     const channel = supabase
-      .channel(`iav2-${studentId}-${Date.now()}`)
+      .channel(`itv-ans-${studentId}-${Date.now()}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "interview_answers_v2", filter: `student_id=eq.${studentId}` },
+        { event: "*", schema: "public", table: answerTable, filter: `student_id=eq.${studentId}` },
         (payload) => {
           const row = payload.new;
           if (!row) return;
@@ -472,7 +529,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [studentId]);
+  }, [studentId, answerTable]);
 
   const persistAnswer = async (questionId, text, submit = false) => {
     const now = new Date().toISOString();
@@ -483,10 +540,12 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       answered_at: now,
       updated_at: now,
     };
+    // univ_answers는 어느 탭의 답변인지 함께 저장한다.
+    if (isUnivCat) payload.tab_key = activeTab;
     if (submit) payload.submitted_at = now;
 
     const { data, error } = await supabase
-      .from("interview_answers_v2")
+      .from(answerTable)
       .upsert(payload, { onConflict: "question_id,student_id" })
       .select()
       .maybeSingle();
@@ -498,7 +557,12 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   };
 
   useEffect(() => {
-    if (locked || activeTab === "debate") return;
+    if (
+      locked ||
+      activeTab === "debate" ||
+      activeTab === "simulation" ||
+      (assignment?.category_key === "univ" && activeTab === "major")
+    ) return;
     const timer = setTimeout(async () => {
       const targets = questionsRef.current.filter((q) => {
         const t = answers[q.id] ?? "";
@@ -567,11 +631,21 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const subLabel = getSubLabel(assignment.category_key, assignment.sub_key);
   const tabs = cat?.tabs ?? [];
   const seriesList = getSeries(assignment.category_key, assignment.sub_key);
-  const showSeriesPicker = activeTab === "gichul" && seriesList.length > 0;
+
+  const isUniv = assignment.category_key === "univ";
+  const isGichulTab = activeTab === "gichul";
+
+  // 공무원 등: 상수 직렬 버튼 / 대입: 학교·학과·전형 드롭다운
+  const showSeriesPicker = isGichulTab && !isUniv && seriesList.length > 0;
+  const showUnivPicker = isGichulTab && isUniv;
+
   const materials = getMaterials(assignment.category_key, assignment.sub_key);
   const isMaterialsTab = activeTab === "materials";
   const isDebateTab = activeTab === "debate";
-  const canPrint = !isMaterialsTab && !isDebateTab && questions.length > 0;
+  const isSimulationTab = activeTab === "simulation";
+  const isMajorTab = isUniv && activeTab === "major";
+  const canPrint =
+    !isMaterialsTab && !isDebateTab && !isSimulationTab && !isMajorTab && questions.length > 0;
 
   const fileUrl = (path) =>
     `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/student-files/${encodeURI(path)}`;
@@ -580,10 +654,12 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     const c = getCategoryLabel(assignment.category_key);
     const s = subLabel ? ` · ${subLabel}` : "";
     const tb = activeTab ? ` — ${getTabLabel(assignment.category_key, activeTab)}` : "";
-    const sr =
-      activeSeries && showSeriesPicker
-        ? ` (${getSeriesLabel(assignment.category_key, assignment.sub_key, activeSeries)})`
-        : "";
+    let sr = "";
+    if (activeSeries && showSeriesPicker) {
+      sr = ` (${getSeriesLabel(assignment.category_key, assignment.sub_key, activeSeries)})`;
+    } else if (showUnivPicker && univPick) {
+      sr = ` (${univPick.univ} · ${univPick.major} · ${univPick.admission})`;
+    }
     return `${c}${s} 면접${tb}${sr}`;
   };
 
@@ -591,6 +667,14 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const todayStr = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
 
   const renderBody = () => {
+    if (isSimulationTab) {
+      return <Simulation studentId={studentId} locked={locked} />;
+    }
+
+    if (isMajorTab) {
+      return <MajorQuestions locked={locked} />;
+    }
+
     if (isMaterialsTab) {
       return (
         <div className="space-y-3">
@@ -647,11 +731,15 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     if (loadingQ) return <p className="py-10 text-center text-slate-400">불러오는 중...</p>;
 
     if (questions.length === 0) {
+      let hint = "이 탭에 등록된 질문이 아직 없습니다.";
+      if (showSeriesPicker && !activeSeries) {
+        hint = "직렬을 선택하면 해당 직렬의 기출문제가 표시됩니다.";
+      } else if (showUnivPicker && !univPick) {
+        hint = "학교, 학과, 전형을 선택하면 기출문제가 표시됩니다.";
+      }
       return (
         <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
-          {showSeriesPicker && !activeSeries
-            ? "직렬을 선택하면 해당 직렬의 기출문제가 표시됩니다."
-            : "이 탭에 등록된 질문이 아직 없습니다."}
+          {hint}
         </p>
       );
     }
@@ -753,6 +841,10 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
             ? "면접 준비에 필요한 자료를 다운로드하세요."
             : isDebateTab
             ? "주제를 선택하면 AI와 실전처럼 토론·토의합니다."
+            : isSimulationTab
+            ? "실전처럼 면접관 앞에서 답변을 녹음하고 피드백을 받습니다."
+            : isMajorTab
+            ? "학과를 선택하고 Day별 문제를 풀면 정답과 해설을 바로 확인할 수 있습니다."
             : "작성 중인 내용은 자동 저장됩니다. 저장 버튼을 눌러야 선생님께 전달됩니다."}
         </p>
       </div>
@@ -795,6 +887,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
         )}
       </div>
 
+      {/* 공무원 등: 직렬 버튼 */}
       {showSeriesPicker && (
         <div className="no-print mb-5">
           <p className="mb-2 text-xs font-bold text-slate-500">직렬 선택</p>
@@ -818,6 +911,11 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
             })}
           </div>
         </div>
+      )}
+
+      {/* 대입: 학교 → 학과 → 전형 드롭다운 */}
+      {showUnivPicker && (
+        <UnivQuestionPicker value={univPick} onSelect={setUnivPick} />
       )}
 
       {canPrint && (

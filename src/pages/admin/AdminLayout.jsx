@@ -7,6 +7,7 @@ import StudentsTab from "./StudentsTab";
 import TeachersTab from "./TeachersTab";
 import AdminScheduleTab from "./AdminScheduleTab";
 import ConsultTab from "./ConsultTab";
+import ConsultManualTab from "./ConsultManualTab";
 import InquiryAdminTab from "./InquiryAdminTab";
 import PaymentsTab from "./PaymentsTab";
 import AdminSettlementTab from "./AdminSettlementTab";
@@ -25,6 +26,7 @@ const MENUS = [
   { key: "teachers", label: "선생님 관리" },
   { key: "schedule", label: "전체 스케줄" },
   { key: "consult", label: "상담 관리" },
+  { key: "consultManual", label: "상담 매뉴얼" },
   { key: "inquiry", label: "1:1 문의(채팅)" },
   { key: "payments", label: "결제/환불" },
   { key: "settlement", label: "정산 관리" },
@@ -105,6 +107,8 @@ export default function AdminLayout() {
         return <AdminScheduleTab branchId={branchId} />;
       case "consult":
         return <ConsultTab branchId={branchId} />;
+      case "consultManual":
+        return <ConsultManualTab />;
       case "inquiry":
         return <InquiryAdminTab />;
       case "payments":
@@ -133,6 +137,7 @@ export default function AdminLayout() {
     active !== "teacherProfile" &&
     active !== "approval" &&
     active !== "inquiry" &&
+    active !== "consultManual" &&
     active !== "materials";
 
   return (
