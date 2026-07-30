@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { ABOUT } from "../config";
 import { Img } from "../components/common";
+import { supabase } from "../lib/supabase";
 
 const ICONS = [
   (p) => (<svg viewBox="0 0 24 24" fill="none" {...p}><rect x="5" y="3" width="14" height="18" rx="2" stroke="currentColor" strokeWidth="1.6" /><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>),
@@ -9,6 +11,22 @@ const ICONS = [
 ];
 
 export default function About() {
+  // 원장 사진은 콘텐츠 관리(site_images) 슬롯에서 가져온다.
+  // DB에 없으면 config의 기존 값으로 떨어진다. (Teachers.jsx와 동일한 패턴)
+  const [principalImg, setPrincipalImg] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase
+        .from("site_images")
+        .select("image_url")
+        .eq("slot", "principalImg")
+        .maybeSingle();
+      if (error) console.error("site_images(principalImg) 조회 실패:", error);
+      setPrincipalImg(data?.image_url ?? "");
+    })();
+  }, []);
+
   return (
     <div className="bg-white pt-16">
       <div className="border-b border-slate-100 bg-slate-50 py-12 text-center">
@@ -19,7 +37,7 @@ export default function About() {
       <section className="py-20">
         <div className="mx-auto grid max-w-5xl items-center gap-12 px-6 md:grid-cols-2">
           <Img
-            src={ABOUT.principalImg}
+            src={principalImg || ABOUT.principalImg}
             alt="세움스피치 원장 김지윤"
             label="원장 사진"
             className="mx-auto h-[440px] w-full max-w-sm rounded-2xl object-cover object-top"

@@ -5,6 +5,7 @@ import {
   getSubLabel,
   getCategoryLabel,
   getTabLabel,
+  getSeriesLabel,
 } from "../../lib/interviewConfig";
 
 // ============================================================
@@ -47,10 +48,95 @@ const fmtTime = (iso) => {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
+const NO_SERIES = "__none"; // series_key 가 없는 문항용 키
+
+const SERIES_LABEL_FALLBACK = {
+  hwangyeong: "환경직",
+  environment: "환경직",
+  ilbanhaengjeong: "일반행정직",
+  general_admin: "일반행정직",
+  haengjeong: "일반행정직",
+  sahoe_bokji: "사회복지직",
+  sahoebokji: "사회복지직",
+  social_welfare: "사회복지직",
+  semu: "세무직",
+  tax: "세무직",
+  gyoyukhaengjeong: "교육행정직",
+  education_admin: "교육행정직",
+  bogun: "보건직",
+  health: "보건직",
+  ganho: "간호직",
+  nursing: "간호직",
+  jeonsan: "전산직",
+  computer: "전산직",
+  tomok: "토목직",
+  civil: "토목직",
+  geonchuk: "건축직",
+  architecture: "건축직",
+  jeongi: "전기직",
+  electrical: "전기직",
+  gigye: "기계직",
+  mechanical: "기계직",
+  nongup: "농업직",
+  agriculture: "농업직",
+  sanrim: "산림자원직",
+  forestry: "산림자원직",
+  susan: "수산직",
+  fisheries: "수산직",
+  nokji: "녹지직",
+  green: "녹지직",
+  jijeok: "지적직",
+  cadastral: "지적직",
+  bangjaeanseon: "방재안전직",
+  disaster_safety: "방재안전직",
+  saseo: "사서직",
+  librarian: "사서직",
+  sokgi: "속기직",
+  stenography: "속기직",
+  tonggye: "통계직",
+  statistics: "통계직",
+  gyujeong: "교정직",
+  corrections: "교정직",
+  geomchal: "검찰직",
+  prosecution: "검찰직",
+  chulipguk: "출입국관리직",
+  immigration: "출입국관리직",
+  gwansae: "관세직",
+  customs: "관세직",
+  ujeong: "우정직",
+  postal: "우정직",
+};
+
+function hasHangul(value) {
+  return /[가-힣]/.test(String(value ?? ""));
+}
+
+function resolveSeriesLabel(categoryKey, subKey, key, dbLabel) {
+  if (key === NO_SERIES) return "직렬 미지정";
+
+  const cleanDbLabel = String(dbLabel ?? "").trim();
+  if (hasHangul(cleanDbLabel)) return cleanDbLabel;
+
+  try {
+    const configuredLabel = getSeriesLabel(categoryKey, subKey, key);
+    if (hasHangul(configuredLabel)) return configuredLabel;
+  } catch (_) {}
+
+  return SERIES_LABEL_FALLBACK[key] ?? (cleanDbLabel || key);
+}
+
 // ============================================================
 // 선생님 단체반 모드
 // 반 선택 → 학생 선택 → 탭 → 그 학생의 질문/답변/피드백
-// 기출문제는 학생마다 직렬이 다르므로 "답변한 것만" 표시
+//
+// [기출문제 탭]
+// 학생이 자기 직렬을 골라 답변하므로, 그 학생이 답변한 문항의 series_key 로
+// 직렬을 역추적해서 자동 선택한다. 그 직렬의 문항 전체(답변/미답변 모두)를 보여준다.
+// 아직 답변이 하나도 없으면 직렬을 알 수 없으므로 직렬을 직접 고르게 한다.
+//
+// [주의] interview_answers_v2 조회 시 question_id 를 .in(...) 으로 넘기지 말 것.
+// UUID가 전부 URL에 들어가 길이 한계를 넘고 서버가 400 으로 거절한다.
+// student_id 로만 가져와 JS에서 거른다.
 // ============================================================
 export default function TeacherClassInterview() {
   const [classes, setClasses] = useState([]); // [{course, assignment}]
@@ -61,8 +147,13 @@ export default function TeacherClassInterview() {
   const [selStudent, setSelStudent] = useState(null); // { id, name }
   const [activeTab, setActiveTab] = useState(null);
 
-  const [rows, setRows] = useState([]);   // [{ ...question, _answer }]
+  const [rows, setRows] = useState([]);   // 이 탭 전체 [{ ...question, _answer }]
   const [loading, setLoading] = useState(false);
+
+  // 기출 탭
+  const [gichulView, setGichulView] = useState(null);      // 보고 있는 series_key (null = 미선택)
+  const [studentSeries, setStudentSeries] = useState([]);  // 이 학생이 답변한 직렬
+  const [showAllSeries, setShowAllSeries] = useState(false);
 
   const [draftEdits, setDraftEdits] = useState({}); // { [answerId]: text }
   const [savingId, setSavingId] = useState(null);
@@ -82,12 +173,13 @@ export default function TeacherClassInterview() {
       const { data: me } = await supabase.auth.getUser();
       const myId = me?.user?.id;
 
-      const { data: cs } = await supabase
+      const { data: cs, error } = await supabase
         .from("courses")
         .select("id, title, type, teacher_id, course_kind, interview_category, interview_sub")
         .eq("type", "group")
         .eq("course_kind", "interview")
         .eq("active", true);
+      if (error) console.error("courses 조회 실패:", error);
 
       let list = (cs ?? [])
         .filter((c) => c.interview_category)
@@ -119,10 +211,11 @@ export default function TeacherClassInterview() {
       const cat = getCategory(selClass.assignment.category_key);
       setActiveTab(cat?.tabs?.[0]?.key ?? null);
 
-      const { data: enr } = await supabase
+      const { data: enr, error } = await supabase
         .from("enrollments")
         .select("student_id, profiles:student_id(id, name)")
         .eq("course_id", selClass.course.id);
+      if (error) console.error("enrollments 조회 실패:", error);
       const map = {};
       (enr ?? []).forEach((e) => {
         const p = e.profiles;
@@ -134,89 +227,249 @@ export default function TeacherClassInterview() {
 
   // 3) 학생 선택 → 탭별 현황 집계
   useEffect(() => {
-    if (!selClass || !selStudent) { setTabStats({}); return; }
+    if (!selClass || !selStudent) {
+      setTabStats({});
+      return;
+    }
+
+    let alive = true;
+
     (async () => {
       const { category_key, sub_key } = selClass.assignment;
 
-      // 이 카테고리 전체 질문
-      let q = supabase
+      // 먼저 해당 카테고리의 활성 질문을 모두 가져온다.
+      // 기출문제는 sub_key가 반 배정값과 다르거나 NULL이어도
+      // 직렬(series_key)을 기준으로 사용하므로 sub_key로 제한하지 않는다.
+      const { data: allQuestions, error: qErr } = await supabase
         .from("interview_questions_v2")
-        .select("id, tab_key")
+        .select("id, tab_key, sub_key")
         .eq("category_key", category_key)
         .eq("is_active", true);
-      q = sub_key ? q.eq("sub_key", sub_key) : q.is("sub_key", null);
-      const { data: qs } = await q;
+
+      if (!alive) return;
+
+      if (qErr) {
+        console.error("interview_questions_v2 현황 조회 실패:", qErr);
+        setTabStats({});
+        return;
+      }
+
+      const questions = (allQuestions ?? []).filter((question) => {
+        if (question.tab_key === "gichul") return true;
+
+        return sub_key
+          ? question.sub_key === sub_key
+          : question.sub_key == null;
+      });
 
       const tabOf = {};
-      (qs ?? []).forEach((x) => { tabOf[x.id] = x.tab_key; });
-      const ids = Object.keys(tabOf);
-      if (ids.length === 0) { setTabStats({}); return; }
+      questions.forEach((question) => {
+        tabOf[question.id] = question.tab_key;
+      });
 
-      const { data: ans } = await supabase
+      if (Object.keys(tabOf).length === 0) {
+        setTabStats({});
+        return;
+      }
+
+      // question_id 목록을 .in(...)으로 보내지 않는다.
+      // 문항이 많으면 URL 길이 초과로 Supabase가 400을 반환할 수 있다.
+      const { data: ans, error: aErr } = await supabase
         .from("interview_answers_v2")
         .select("question_id, student_answer, teacher_feedback")
-        .eq("student_id", selStudent.id)
-        .in("question_id", ids);
+        .eq("student_id", selStudent.id);
+
+      if (!alive) return;
+
+      if (aErr) {
+        console.error("interview_answers_v2 현황 조회 실패:", aErr);
+        setTabStats({});
+        return;
+      }
 
       const stats = {};
-      (ans ?? []).forEach((a) => {
-        const tk = tabOf[a.question_id];
-        if (!tk) return;
-        stats[tk] = stats[tk] || { answered: 0, feedbacked: 0 };
-        if (a.student_answer?.trim()) stats[tk].answered++;
-        if (a.teacher_feedback) stats[tk].feedbacked++;
+
+      (ans ?? []).forEach((answer) => {
+        const tabKey = tabOf[answer.question_id];
+        if (!tabKey) return;
+
+        stats[tabKey] = stats[tabKey] || {
+          answered: 0,
+          feedbacked: 0,
+        };
+
+        if (answer.student_answer?.trim()) {
+          stats[tabKey].answered += 1;
+        }
+
+        if (answer.teacher_feedback?.trim()) {
+          stats[tabKey].feedbacked += 1;
+        }
       });
+
       setTabStats(stats);
     })();
+
+    return () => {
+      alive = false;
+    };
   }, [selClass, selStudent]);
 
   // 4) 탭 로드 — 선택 학생 기준
   const loadTab = async () => {
-    if (!selClass || !selStudent || !activeTab) { setRows([]); return; }
+    if (!selClass || !selStudent || !activeTab) {
+      setRows([]);
+      setDraftEdits({});
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
-    const { category_key, sub_key } = selClass.assignment;
 
-    let q = supabase
-      .from("interview_questions_v2")
-      .select("*")
-      .eq("category_key", category_key)
-      .eq("tab_key", activeTab)
-      .eq("is_active", true)
-      .order("seq");
-    q = sub_key ? q.eq("sub_key", sub_key) : q.is("sub_key", null);
+    try {
+      const { category_key, sub_key } = selClass.assignment;
 
-    const { data: qs } = await q;
-    const questionList = qs ?? [];
-    const ids = questionList.map((x) => x.id);
-
-    let ansMap = {};
-    const edits = {};
-    if (ids.length > 0) {
-      const { data: ans } = await supabase
-        .from("interview_answers_v2")
+      let q = supabase
+        .from("interview_questions_v2")
         .select("*")
-        .eq("student_id", selStudent.id)
-        .in("question_id", ids);
-      (ans ?? []).forEach((a) => {
-        ansMap[a.question_id] = a;
-        edits[a.id] = a.teacher_feedback ?? a.ai_draft ?? "";
-      });
+        .eq("category_key", category_key)
+        .eq("tab_key", activeTab)
+        .eq("is_active", true)
+        .order("seq", { ascending: true });
+
+      // 기출문제는 sub_key가 반 배정값과 다르거나 NULL이어도
+      // 직렬(series_key)을 기준으로 선택하므로 sub_key로 제한하지 않는다.
+      if (activeTab !== "gichul") {
+        q = sub_key
+          ? q.eq("sub_key", sub_key)
+          : q.is("sub_key", null);
+      }
+
+      const { data: qs, error: qErr } = await q;
+
+      if (qErr) {
+        throw qErr;
+      }
+
+      const questionList = qs ?? [];
+      const idSet = new Set(questionList.map((question) => question.id));
+      const ansMap = {};
+      const edits = {};
+
+      if (idSet.size > 0) {
+        // question_id를 .in(...)으로 보내지 않는다.
+        // 문항이 많으면 URL 길이 초과로 Supabase가 400을 반환할 수 있다.
+        const { data: ans, error: aErr } = await supabase
+          .from("interview_answers_v2")
+          .select("*")
+          .eq("student_id", selStudent.id);
+
+        if (aErr) {
+          throw aErr;
+        }
+
+        (ans ?? []).forEach((answer) => {
+          if (!idSet.has(answer.question_id)) return;
+
+          ansMap[answer.question_id] = answer;
+          edits[answer.id] =
+            answer.teacher_feedback ??
+            answer.ai_draft ??
+            "";
+        });
+      }
+
+      const merged = questionList.map((question) => ({
+        ...question,
+        _answer: ansMap[question.id] ?? null,
+      }));
+
+      // 기출: 학생이 답변한 문항의 직렬을 역추적해 자동 선택
+      if (activeTab === "gichul") {
+        const detected = Array.from(
+          new Set(
+            merged
+              .filter((row) => row._answer?.student_answer?.trim())
+              .map((row) => row.series_key ?? NO_SERIES)
+          )
+        );
+
+        setStudentSeries(detected);
+        setGichulView(detected[0] ?? null);
+        setShowAllSeries(false);
+      } else {
+        setStudentSeries([]);
+        setGichulView(null);
+        setShowAllSeries(false);
+      }
+
+      setRows(merged);
+      setDraftEdits(edits);
+    } catch (error) {
+      console.error("면접 질문/답변 조회 실패:", error);
+      setRows([]);
+      setDraftEdits({});
+      setStudentSeries([]);
+      setGichulView(null);
+      setShowAllSeries(false);
+
+      alert(
+        `질문을 불러오지 못했습니다.\n\n${
+          error?.message ?? "알 수 없는 오류"
+        }`
+      );
+    } finally {
+      setLoading(false);
     }
-
-    let merged = questionList.map((qq) => ({ ...qq, _answer: ansMap[qq.id] || null }));
-
-    // 기출문제는 학생마다 직렬이 다르므로, 답변한 것만 표시
-    if (activeTab === "gichul") {
-      merged = merged.filter((r) => r._answer?.student_answer?.trim());
-    }
-
-    setRows(merged);
-    setDraftEdits(edits);
-    setLoading(false);
   };
 
   useEffect(() => { loadTab(); /* eslint-disable-next-line */ },
     [selClass, selStudent, activeTab]);
+
+  // ── 화면에 보일 목록 계산 ─────────────────────────────
+  const isGichul = activeTab === "gichul";
+
+  // 직렬 키를 화면용 한글 명칭으로 변환한다.
+  // 우선순위: DB 한글 라벨 → interviewConfig 한글 라벨 → 자체 한글 매핑.
+  const seriesLabelMap = rows.reduce((acc, row) => {
+    const key = row.series_key ?? NO_SERIES;
+
+    if (!acc[key]) {
+      acc[key] = resolveSeriesLabel(
+        selClass?.assignment?.category_key,
+        selClass?.assignment?.sub_key,
+        key,
+        row.series_label
+      );
+    }
+
+    return acc;
+  }, {});
+
+  // 이 탭 전체 직렬 목록 (문항 수 많은 순)
+  const allSeries = isGichul
+    ? Object.entries(
+        rows.reduce((acc, row) => {
+          const key = row.series_key ?? NO_SERIES;
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {})
+      ).sort((a, b) => b[1] - a[1])
+    : [];
+
+  // 학생 직렬이 파악되면 그것만, 아니면 전체를 버튼으로
+  const seriesButtons =
+    showAllSeries || studentSeries.length === 0
+      ? allSeries
+      : allSeries.filter(([k]) => studentSeries.includes(k));
+
+  const visibleRows = !isGichul
+    ? rows
+    : gichulView === null
+    ? []
+    : rows.filter((r) => (r.series_key ?? NO_SERIES) === gichulView);
+
+  const answeredInView = visibleRows.filter((r) => r._answer?.student_answer?.trim()).length;
 
   // AI 초안 1건
   const genOne = async (qRow, answerRow) => {
@@ -271,9 +524,9 @@ export default function TeacherClassInterview() {
     }
   };
 
-  // 이 학생 · 이 탭의 미확정 답변 전부
+  // 지금 보이는 목록 중 미확정 답변 전부
   const genAllForStudent = async () => {
-    const targets = rows.filter(
+    const targets = visibleRows.filter(
       (r) => r._answer?.student_answer?.trim() && !r._answer.teacher_feedback
     );
     if (targets.length === 0) return alert("AI 초안을 생성할 답변이 없습니다. (이미 확정된 것은 제외)");
@@ -344,7 +597,7 @@ export default function TeacherClassInterview() {
 
   const cat = selClass ? getCategory(selClass.assignment.category_key) : null;
   const tabs = cat?.tabs ?? [];
-  const pendingCount = rows.filter(
+  const pendingCount = visibleRows.filter(
     (r) => r._answer?.student_answer?.trim() && !r._answer.teacher_feedback
   ).length;
 
@@ -444,12 +697,44 @@ export default function TeacherClassInterview() {
                 })}
               </div>
 
+              {/* 기출 탭 — 직렬 */}
+              {isGichul && !loading && rows.length > 0 && (
+                <div className="mb-4 rounded-xl bg-slate-50 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-xs font-medium text-slate-500">
+                      {studentSeries.length > 0
+                        ? `${selStudent.name} 학생이 답변한 직렬`
+                        : "이 학생은 아직 기출에 답변하지 않았습니다 · 직렬을 선택하세요"}
+                    </p>
+                    {studentSeries.length > 0 && (
+                      <button type="button" onClick={() => setShowAllSeries((v) => !v)}
+                        className="shrink-0 text-xs font-medium text-seum-blue hover:underline">
+                        {showAllSeries ? "학생 직렬만" : "전체 직렬 보기"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {seriesButtons.map(([key, cnt]) => (
+                      <button key={key} type="button" onClick={() => setGichulView(key)}
+                        className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                          gichulView === key
+                            ? "bg-seum-blue text-white"
+                            : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100"
+                        }`}>
+                        {seriesLabelMap[key] ?? key} ({cnt})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* 학생 · 탭 헤더 + 일괄 AI */}
               <div className="mb-3 flex items-center justify-between">
                 <div className="text-sm font-bold text-seum-navy">
                   {selStudent.name}
                   <span className="ml-2 text-xs font-medium text-slate-400">
                     {getTabLabel(selClass.assignment.category_key, activeTab)}
+                    {visibleRows.length > 0 && ` · ${visibleRows.length}문항 중 답변 ${answeredInView}건`}
                     {pendingCount > 0 && ` · 미확정 ${pendingCount}건`}
                   </span>
                 </div>
@@ -469,15 +754,17 @@ export default function TeacherClassInterview() {
 
               {loading ? (
                 <p className="py-10 text-center text-slate-400">불러오는 중...</p>
-              ) : rows.length === 0 ? (
+              ) : visibleRows.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
-                  {activeTab === "gichul"
-                    ? "이 학생이 답변한 기출문제가 없습니다."
+                  {isGichul
+                    ? rows.length > 0
+                      ? "위에서 직렬을 선택하세요."
+                      : "이 탭에 등록된 기출문제가 없습니다."
                     : "이 탭에 등록된 질문이 없습니다."}
                 </p>
               ) : (
                 <div className="space-y-4">
-                  {rows.map((qRow, i) => {
+                  {visibleRows.map((qRow, i) => {
                     const a = qRow._answer;
                     const hasAnswer = !!a?.student_answer?.trim();
 

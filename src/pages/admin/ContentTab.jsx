@@ -101,16 +101,28 @@ function CropModal({ file, cropType, onCancel, onConfirm }) {
   const boxH = Math.round(boxW * size.h / size.w); // 비율 맞춘 세로
 
   const [imgEl, setImgEl] = useState(null);
+  const [imgUrl, setImgUrl] = useState(null);      // 화면 표시용 data URL
   const [zoom, setZoom] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });   // 이미지 좌상단 오프셋(px)
   const drag = useRef(null);
 
-  // 이미지 로드 + 초기 배치(박스를 꽉 채우는 최소 스케일)
+  // 이미지 로드 — blob URL(createObjectURL) 대신 FileReader data URL 사용.
+  // blob 주소는 해제(revoke) 타이밍에 따라 ERR_FILE_NOT_FOUND가 나므로 아예 쓰지 않는다.
+  // StrictMode(개발모드)에서 effect가 두 번 도는 경우를 대비해 cancelled 플래그 사용.
   useEffect(() => {
-    const url = URL.createObjectURL(file);
-    const im = new Image();
-    im.onload = () => { setImgEl(im); URL.revokeObjectURL(url); };
-    im.src = url;
+    let cancelled = false;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const im = new Image();
+      im.onload = () => {
+        if (cancelled) return;
+        setImgEl(im);
+        setImgUrl(reader.result);
+      };
+      im.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+    return () => { cancelled = true; };
   }, [file]);
 
   // 박스를 채우는 기본 스케일(cover)
@@ -187,8 +199,8 @@ function CropModal({ file, cropType, onCancel, onConfirm }) {
 
         <div className="mx-auto overflow-hidden rounded-xl ring-2 ring-seum-blue" style={{ width: boxW, height: boxH, position: "relative", touchAction: "none", cursor: "move" }}
           onMouseDown={onDown} onTouchStart={onDown}>
-          {imgEl ? (
-            <img src={imgEl.src} alt="crop" draggable={false}
+          {imgEl && imgUrl ? (
+            <img src={imgUrl} alt="crop" draggable={false}
               style={{ position: "absolute", left: pos.x, top: pos.y, width: dispW, height: dispH, maxWidth: "none", userSelect: "none" }} />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-slate-400">불러오는 중...</div>
@@ -215,19 +227,21 @@ function CropModal({ file, cropType, onCancel, onConfirm }) {
 // ════════════════════════════════════════════════
 function resizeLogo(file) {
   return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
-    const im = new Image();
-    im.onload = () => {
-      URL.revokeObjectURL(url);
-      const maxW = 600;
-      const scale = Math.min(1, maxW / im.width);
-      const canvas = document.createElement("canvas");
-      canvas.width = im.width * scale;
-      canvas.height = im.height * scale;
-      canvas.getContext("2d").drawImage(im, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => resolve(new File([blob], file.name.replace(/\.[^.]+$/, "") + ".png", { type: "image/png" })), "image/png");
+    const reader = new FileReader();
+    reader.onload = () => {
+      const im = new Image();
+      im.onload = () => {
+        const maxW = 600;
+        const scale = Math.min(1, maxW / im.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = im.width * scale;
+        canvas.height = im.height * scale;
+        canvas.getContext("2d").drawImage(im, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => resolve(new File([blob], file.name.replace(/\.[^.]+$/, "") + ".png", { type: "image/png" })), "image/png");
+      };
+      im.src = reader.result;
     };
-    im.src = url;
+    reader.readAsDataURL(file);
   });
 }
 
@@ -243,7 +257,12 @@ export default function ContentTab() {
 
   const load = async () => {
     setLoading(true);
-    const { data } = await supabase.from("site_images").select("*");
+    // 조회 에러를 삼키지 않고 표시한다 (예전엔 error를 안 봐서 원인 파악이 어려웠음)
+    const { data, error } = await supabase.from("site_images").select("*");
+    if (error) {
+      console.error("site_images 조회 실패:", error);
+      alert("사진 목록을 불러오지 못했습니다: " + error.message);
+    }
     const map = {};
     (data ?? []).forEach((r) => { map[r.slot] = r; });
     setImages(map);
