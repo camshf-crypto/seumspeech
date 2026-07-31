@@ -1,12 +1,13 @@
 import { useSiteImage } from "../../lib/useSiteImage";
 import { ITV_GALLERY } from "../../interviewConfig";
 
+// 면접 교육현장 사진도 잘리지 않고 전체가 보이도록 object-contain으로 표시
 function GalleryItem({ slot, caption }) {
   const img = useSiteImage(slot);
   return (
     <div className="group relative aspect-[4/3] overflow-hidden rounded-2xl bg-slate-100">
       {img ? (
-        <img src={img} alt={caption} className="h-full w-full object-cover transition group-hover:scale-105" />
+        <img src={img} alt={caption} className="h-full w-full bg-white object-contain" />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">
           사진

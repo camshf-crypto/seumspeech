@@ -61,7 +61,8 @@ export default function TeacherLayout() {
     { key: "schedule", label: "내 스케줄" },
     { key: "attendance", label: "출석 체크" },
     { key: "homework", label: "숙제 피드백" },
-    { key: "interview", label: "1:1 면접수업" },
+    { key: "interview_group", label: "단체반 수업" },
+    { key: "interview_one", label: "1:1 수업" },
     { key: "materials", label: "학생 자료함" },
     { key: "chat", label: "학생 채팅" },
     { key: "notifications", label: "알림" },
@@ -80,8 +81,10 @@ export default function TeacherLayout() {
         return <AttendanceTab />;
       case "homework":
         return <TeacherHomeworkTab teacherId={profile.id} />;
-      case "interview":
-        return <TeacherInterviewTab teacherId={profile.id} />;
+      case "interview_group":
+        return <TeacherInterviewTab teacherId={profile.id} courseType="group" />;
+      case "interview_one":
+        return <TeacherInterviewTab teacherId={profile.id} courseType="oneonone" />;
       case "materials":
         return <StudentMaterialsView teacherId={profile.id} />;
       case "chat":

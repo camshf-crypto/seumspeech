@@ -143,7 +143,7 @@ export default function TeacherProfileTab() {
           <div key={t.id} className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-4">
             <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
               {t.image_url ? (
-                <img src={t.image_url} alt={t.name} className="h-full w-full object-cover" />
+                <img src={t.image_url} alt={t.name} className="h-full w-full object-contain" />
               ) : (
                 <span className="text-[10px] text-slate-300">사진없음</span>
               )}
@@ -189,7 +189,7 @@ export default function TeacherProfileTab() {
                 <div className="flex items-center gap-4">
                   <div className="flex h-24 w-24 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
                     {formPreview ? (
-                      <img src={formPreview} alt="미리보기" className="h-full w-full object-cover" />
+                      <img src={formPreview} alt="미리보기" className="h-full w-full object-contain" />
                     ) : (
                       <span className="text-[10px] text-slate-300">사진없음</span>
                     )}

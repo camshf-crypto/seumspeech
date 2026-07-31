@@ -129,7 +129,7 @@ function Greeting() {
             <p>자신 있고 당당한 말하기로부터 당신도 인생의 주인공이 될 수 있습니다.<br />확실한 변화의 시작 세움스피치학원와 함께 하세요.<br />당신도 할 수 있습니다.</p>
           </div>
         </div>
-        <Img src={IMAGES.principal} alt="세움스피치학원 원장" label="원장 사진" className="h-[420px] w-full rounded-xl object-cover object-top" />
+        <Img src={IMAGES.principal} alt="세움스피치학원 원장" label="원장 사진" className="h-[420px] w-full rounded-xl bg-white object-contain" />
       </div>
     </section>
   );

@@ -13,7 +13,7 @@ export default function Branches() {
         <div className="mx-auto grid max-w-3xl gap-6 sm:grid-cols-2">
           {BRANCHES.map((b) => (
             <div key={b.id} className="overflow-hidden rounded-2xl bg-white shadow-sm">
-              <Img src={b.img} alt={b.name} label={`${b.name} 사진`} className="h-48 w-full object-cover" />
+              <Img src={b.img} alt={b.name} label={`${b.name} 사진`} className="h-48 w-full bg-white object-contain" />
 
               <iframe
                 title={`${b.name} 지도`}

@@ -143,7 +143,7 @@ export default function CoursesTab({ branchId }) {
       if (weekdays.length === 0) { alert("면접반은 요일을 하나 이상 선택하세요."); return; }
       if (!weeks || Number(weeks) < 1) { alert("주차 수를 입력하세요."); return; }
       const cat = getCategory(itvCategory);
-      if (cat?.subs?.length && !itvSub) { alert("세부(인천/서울)를 선택하세요."); return; }
+      if (cat?.subs?.length && !itvSub) { alert("세부 지역을 선택하세요."); return; }
     }
 
     setSaving(true);

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import PtReview from "./PtReview";
 import {
   getCategory,
   getSubLabel,
@@ -49,6 +50,29 @@ const fmtTime = (iso) => {
 };
 
 const NO_SERIES = "__none"; // series_key 가 없는 문항용 키
+
+// 지역(sub_key) 구분 없이 함께 쓰는 문항
+// - 공무원(gov)은 지역별로 문항을 따로 만들지 않고 전 지역이 같은 문항을 쓴다.
+// - 그 외 카테고리는 기출·PT·토론만 공통.
+const SHARED_CATEGORIES = ["gov"];
+const SHARED_TABS = ["gichul", "pt", "debate"];
+const isSharedContent = (categoryKey, tabKey) =>
+  SHARED_CATEGORIES.includes(categoryKey) || SHARED_TABS.includes(tabKey);
+
+// 지역별로 같은 문항이 복사돼 들어간 경우가 있다(공직관·기본인성).
+// sub_key 필터를 풀면 같은 질문이 지역 수만큼 중복으로 보이므로,
+// 질문 내용 기준으로 한 벌만 남긴다. 이미 답변이 달린 사본을 우선한다.
+const dedupeByQuestion = (rows) => {
+  const score = (r) =>
+    r?._answer?.student_answer?.trim() ? 2 : r?._answer ? 1 : 0;
+  const byText = new Map();
+  rows.forEach((r) => {
+    const key = (r.question ?? "").trim();
+    const prev = byText.get(key);
+    if (!prev || score(r) > score(prev)) byText.set(key, r);
+  });
+  return Array.from(byText.values());
+};
 
 const SERIES_LABEL_FALLBACK = {
   hwangyeong: "환경직",
@@ -138,7 +162,11 @@ function resolveSeriesLabel(categoryKey, subKey, key, dbLabel) {
 // UUID가 전부 URL에 들어가 길이 한계를 넘고 서버가 400 으로 거절한다.
 // student_id 로만 가져와 JS에서 거른다.
 // ============================================================
-export default function TeacherClassInterview() {
+export default function TeacherClassInterview({ courseType = "group" }) {
+  // courseType: "group"(단체반) | "oneonone"(1:1)
+  const MODE_LABEL = courseType === "group" ? "단체반" : "1:1 수업";
+
+  const [myId, setMyId] = useState(null);     // 로그인한 선생님 id
   const [classes, setClasses] = useState([]); // [{course, assignment}]
   const [classesLoading, setClassesLoading] = useState(true);
 
@@ -170,13 +198,15 @@ export default function TeacherClassInterview() {
   useEffect(() => {
     (async () => {
       setClassesLoading(true);
+      setSelClass(null);
       const { data: me } = await supabase.auth.getUser();
       const myId = me?.user?.id;
+      setMyId(myId ?? null);
 
       const { data: cs, error } = await supabase
         .from("courses")
         .select("id, title, type, teacher_id, course_kind, interview_category, interview_sub")
-        .eq("type", "group")
+        .eq("type", courseType)
         .eq("course_kind", "interview")
         .eq("active", true);
       if (error) console.error("courses 조회 실패:", error);
@@ -189,14 +219,32 @@ export default function TeacherClassInterview() {
         }));
 
       if (myId) {
-        const mine = list.filter((c) => c.course.teacher_id === myId);
-        if (mine.length > 0) list = mine;
+        if (courseType === "group") {
+          // 단체반: 수업 자체에 담당 선생님이 지정돼 있다.
+          const mine = list.filter(
+            (c) => c.course.teacher_id === myId || c.course.teacher_id == null
+          );
+          if (mine.length > 0) list = mine;
+        } else {
+          // 1:1: 수업(1:1 공무원면접 등)은 전 선생님 공용이고,
+          // 담당은 enrollments.teacher_id 로 정해진다.
+          // 내가 담당하는 수강이 있는 수업만 남긴다.
+          const { data: myEnr, error: enrErr } = await supabase
+            .from("enrollments")
+            .select("course_id")
+            .eq("teacher_id", myId);
+          if (enrErr) console.error("내 담당 수강 조회 실패:", enrErr);
+          const myCourseIds = new Set((myEnr ?? []).map((e) => e.course_id));
+          list = list.filter((c) => myCourseIds.has(c.course.id));
+        }
       }
+
+      list.sort((a, b) => (a.course.title || "").localeCompare(b.course.title || ""));
 
       setClasses(list);
       setClassesLoading(false);
     })();
-  }, []);
+  }, [courseType]);
 
   // 2) 반 선택 → 학생 목록
   useEffect(() => {
@@ -211,10 +259,13 @@ export default function TeacherClassInterview() {
       const cat = getCategory(selClass.assignment.category_key);
       setActiveTab(cat?.tabs?.[0]?.key ?? null);
 
-      const { data: enr, error } = await supabase
+      let enrQ = supabase
         .from("enrollments")
-        .select("student_id, profiles:student_id(id, name)")
+        .select("student_id, teacher_id, profiles:student_id(id, name)")
         .eq("course_id", selClass.course.id);
+      // 1:1 은 내가 담당하는 학생만 보여준다.
+      if (courseType !== "group" && myId) enrQ = enrQ.eq("teacher_id", myId);
+      const { data: enr, error } = await enrQ;
       if (error) console.error("enrollments 조회 실패:", error);
       const map = {};
       (enr ?? []).forEach((e) => {
@@ -223,7 +274,7 @@ export default function TeacherClassInterview() {
       });
       setStudents(Object.values(map));
     })();
-  }, [selClass]);
+  }, [selClass, courseType, myId]);
 
   // 3) 학생 선택 → 탭별 현황 집계
   useEffect(() => {
@@ -255,7 +306,7 @@ export default function TeacherClassInterview() {
       }
 
       const questions = (allQuestions ?? []).filter((question) => {
-        if (question.tab_key === "gichul") return true;
+        if (isSharedContent(category_key, question.tab_key)) return true;
 
         return sub_key
           ? question.sub_key === sub_key
@@ -339,7 +390,8 @@ export default function TeacherClassInterview() {
 
       // 기출문제는 sub_key가 반 배정값과 다르거나 NULL이어도
       // 직렬(series_key)을 기준으로 선택하므로 sub_key로 제한하지 않는다.
-      if (activeTab !== "gichul") {
+      // 기출·PT·토론은 지역(sub_key) 구분 없이 전 지역 공통으로 쓴다.
+      if (!isSharedContent(category_key, activeTab)) {
         q = sub_key
           ? q.eq("sub_key", sub_key)
           : q.is("sub_key", null);
@@ -379,10 +431,13 @@ export default function TeacherClassInterview() {
         });
       }
 
-      const merged = questionList.map((question) => ({
+      let merged = questionList.map((question) => ({
         ...question,
         _answer: ansMap[question.id] ?? null,
       }));
+
+      // 지역별 사본이 합쳐지는 탭은 같은 질문을 한 번만 보여준다.
+      if (isSharedContent(category_key, activeTab)) merged = dedupeByQuestion(merged);
 
       // 기출: 학생이 답변한 문항의 직렬을 역추적해 자동 선택
       if (activeTab === "gichul") {
@@ -428,6 +483,7 @@ export default function TeacherClassInterview() {
 
   // ── 화면에 보일 목록 계산 ─────────────────────────────
   const isGichul = activeTab === "gichul";
+  const isPt = activeTab === "pt";
 
   // 직렬 키를 화면용 한글 명칭으로 변환한다.
   // 우선순위: DB 한글 라벨 → interviewConfig 한글 라벨 → 자체 한글 매핑.
@@ -601,16 +657,16 @@ export default function TeacherClassInterview() {
     (r) => r._answer?.student_answer?.trim() && !r._answer.teacher_feedback
   ).length;
 
-  if (classesLoading) return <p className="text-slate-400">단체반 불러오는 중...</p>;
+  if (classesLoading) return <p className="text-slate-400">{MODE_LABEL} 불러오는 중...</p>;
 
   return (
     <div>
       {/* 반 선택 */}
       <div className="mb-5">
-        <p className="mb-2 text-sm font-medium text-slate-500">단체반 선택</p>
+        <p className="mb-2 text-sm font-medium text-slate-500">{MODE_LABEL} 선택</p>
         {classes.length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-300 py-8 text-center text-sm text-slate-400">
-            면접 카테고리가 배정된 단체반이 없습니다. (어드민 &gt; 단체반 면접설정에서 배정)
+            면접 카테고리가 배정된 {MODE_LABEL}이(가) 없습니다. (어드민 &gt; 면접설정에서 배정)
           </p>
         ) : (
           <div className="flex flex-wrap gap-2">
@@ -632,7 +688,7 @@ export default function TeacherClassInterview() {
 
       {!selClass ? (
         <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
-          단체반을 선택해주세요.
+          {MODE_LABEL}을(를) 선택해주세요.
         </p>
       ) : (
         <>
@@ -649,7 +705,7 @@ export default function TeacherClassInterview() {
             </div>
             {students.length === 0 ? (
               <p className="rounded-xl border border-dashed border-slate-300 py-6 text-center text-sm text-slate-400">
-                이 반에 등록된 학생이 없습니다.
+                이 수업에 등록된 학생이 없습니다.
               </p>
             ) : (
               <div className="flex flex-wrap gap-2">
@@ -728,6 +784,15 @@ export default function TeacherClassInterview() {
                 </div>
               )}
 
+              {isPt ? (
+                <PtReview
+                  studentId={selStudent.id}
+                  studentName={selStudent.name}
+                  categoryKey={selClass.assignment.category_key}
+                  subKey={selClass.assignment.sub_key}
+                />
+              ) : (
+              <>
               {/* 학생 · 탭 헤더 + 일괄 AI */}
               <div className="mb-3 flex items-center justify-between">
                 <div className="text-sm font-bold text-seum-navy">
@@ -848,6 +913,8 @@ export default function TeacherClassInterview() {
                     );
                   })}
                 </div>
+              )}
+              </>
               )}
             </>
           )}

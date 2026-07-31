@@ -9,7 +9,7 @@ export default function Location() {
           src={IMAGES.gallery}
           alt={ADDRESS.name}
           label="배움터 갤러리"
-          className="h-64 w-full rounded-xl object-cover"
+          className="h-64 w-full rounded-xl bg-white object-contain"
         />
         <div className="relative flex flex-col justify-center rounded-xl bg-seum-navy p-8 text-white">
           <p className="mb-1 text-sm text-white/60">{ADDRESS.name}</p>

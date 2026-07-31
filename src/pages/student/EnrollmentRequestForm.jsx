@@ -27,6 +27,8 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
   const submit = async () => {
     if (!name.trim()) return alert("성명을 입력하세요.");
     if (!phone.trim()) return alert("전화번호를 입력하세요.");
+    // 지점이 비면 나중에 학생 정보를 일일이 고쳐야 하므로 필수로 받는다.
+    if (!branchId) return alert("희망 지점을 선택하세요.");
     if (!agree) return alert("개인정보 수집·이용에 동의해야 신청할 수 있습니다.");
     if (!termsAgree) return alert("이용약관 및 환불규정에 동의해야 신청할 수 있습니다.");
 
@@ -39,7 +41,7 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
       birth: birth || null,
       email: email.trim() || null,
       address: address.trim() || null,
-      branch_id: branchId || null,
+      branch_id: branchId,
       lesson_type: lessonType,
       lesson_detail: lessonDetail || null,
       visit_path: visitPath || null,
@@ -54,7 +56,7 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
     }
 
     await supabase.from("profiles")
-      .update({ name: name.trim(), phone: phone.trim(), status: "pending", branch_id: branchId || null })
+      .update({ name: name.trim(), phone: phone.trim(), status: "pending", branch_id: branchId })
       .eq("id", studentId);
 
     setSaving(false);
@@ -150,19 +152,26 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
           </div>
         </div>
 
-        {/* 희망 지점 */}
+        {/* 희망 지점 (필수) */}
         <div className="mb-4">
-          <label className="mb-1 block text-sm font-medium text-slate-600">희망 지점</label>
+          <label className="mb-1 block text-sm font-medium text-slate-600">
+            희망 지점 <span className="text-red-500">*</span>
+          </label>
           <select
             value={branchId}
             onChange={(e) => setBranchId(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-600 outline-none focus:border-seum-blue"
+            className={`w-full rounded-lg border px-3 py-2.5 outline-none focus:border-seum-blue ${
+              branchId ? "border-slate-300 text-slate-700" : "border-red-300 text-slate-400"
+            }`}
           >
             <option value="">지점 선택...</option>
             {branches.map((b) => (
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
+          {!branchId && (
+            <p className="mt-1 text-xs text-red-500">다니실 지점을 선택해주세요.</p>
+          )}
         </div>
 
         {/* 수강 형태 */}
@@ -286,7 +295,7 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
         <button
           type="button"
           onClick={submit}
-          disabled={saving || !agree || !termsAgree}
+          disabled={saving || !branchId || !agree || !termsAgree}
           className="w-full rounded-lg bg-seum-blue py-3.5 font-bold text-white hover:bg-[#2a63c4] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {saving ? "신청 중..." : "가입 신청하기"}

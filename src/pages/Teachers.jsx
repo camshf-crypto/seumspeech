@@ -45,9 +45,9 @@ export default function Teachers() {
 
           <div className="grid items-start gap-10 md:grid-cols-2">
             <div>
-              <div className="h-[420px] w-full overflow-hidden rounded-2xl bg-slate-100">
+              <div className="flex min-h-[420px] w-full items-center justify-center overflow-hidden rounded-2xl bg-white">
                 {principalImg ? (
-                  <img src={principalImg} alt={principal.name} className="h-full w-full object-cover object-top" />
+                  <img src={principalImg} alt={principal.name} className="block h-auto w-full object-contain" />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-slate-300">대표원장 사진</div>
                 )}
@@ -110,7 +110,7 @@ export default function Teachers() {
                 >
                   <div className="h-64 w-full overflow-hidden bg-slate-100">
                     {t.image_url ? (
-                      <img src={t.image_url} alt={t.name} className="h-full w-full object-cover object-top" />
+                      <img src={t.image_url} alt={t.name} className="h-full w-full object-contain" />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-slate-300">사진 없음</div>
                     )}
@@ -144,7 +144,7 @@ export default function Teachers() {
               <div>
                 <div className="aspect-[3/4] w-full overflow-hidden rounded-xl bg-slate-100">
                   {selected.image_url ? (
-                    <img src={selected.image_url} alt={selected.name} className="h-full w-full object-cover object-top" />
+                    <img src={selected.image_url} alt={selected.name} className="h-full w-full object-contain" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-slate-300">사진 없음</div>
                   )}

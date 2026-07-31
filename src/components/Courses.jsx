@@ -33,7 +33,7 @@ export default function Courses() {
               href="#"
               className="group overflow-hidden rounded-xl bg-slate-50 shadow-sm transition hover:-translate-y-1 hover:shadow-md"
             >
-              <Img src={c.img} alt={c.t} label={`강좌 ${i + 1}`} className="h-44 w-full object-cover" />
+              <Img src={c.img} alt={c.t} label={`강좌 ${i + 1}`} className="h-44 w-full bg-white object-contain" />
               <div className="p-6">
                 <h3 className="mb-2 text-lg font-bold text-slate-800">{c.t}</h3>
                 <p className="mb-5 text-sm leading-relaxed text-slate-500">{c.d}</p>

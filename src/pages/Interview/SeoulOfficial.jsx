@@ -7,7 +7,7 @@ function ClassPhoto({ slot, caption }) {
   return (
     <div className="group relative aspect-[4/3] overflow-hidden rounded-2xl bg-slate-100">
       {img ? (
-        <img src={img} alt={caption} className="h-full w-full object-cover transition group-hover:scale-105" />
+        <img src={img} alt={caption} className="h-full w-full object-contain" />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">수업 사진</div>
       )}

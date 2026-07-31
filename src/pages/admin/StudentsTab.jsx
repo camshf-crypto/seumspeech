@@ -416,7 +416,7 @@ export default function StudentsTab({ branchId }) {
   const saveAssign = async () => {
     if (!assignCategory) return alert("카테고리를 선택하세요.");
     const cat = getCategory(assignCategory);
-    if (cat?.subs?.length && !assignSub) return alert("세부(인천/서울)를 선택하세요.");
+    if (cat?.subs?.length && !assignSub) return alert("세부 지역을 선택하세요.");
     setAssignSaving(true);
     const now = new Date().toISOString();
     const { error } = await supabase
@@ -865,7 +865,7 @@ export default function StudentsTab({ branchId }) {
               </div>
             </div>
 
-            {/* 공무원 세부 (인천/서울) */}
+            {/* 공무원 세부 지역 */}
             {assignCat?.subs?.length ? (
               <div>
                 <label className="mb-1.5 block text-xs text-slate-500">세부 선택</label>

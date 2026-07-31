@@ -9,6 +9,8 @@ export const CATEGORIES = {
     subs: [
       { key: "incheon", label: "인천시 공무원" },
       { key: "seoul", label: "서울시 공무원" },
+      { key: "bucheon", label: "부천시 공무원" },
+      { key: "anseong", label: "안성시 공무원" },
     ],
     tabs: [
       { key: "gongjik", label: "공직관" },
@@ -114,6 +116,30 @@ export const GOV_SERIES = {
     { key: "hwangyeong", label: "환경" },
   ],
   seoul: [],
+  // 부천·안성은 인천과 같은 직렬 구성으로 시작한다.
+  // 기출문항이 쌓이면 각 시에 맞게 조정할 것.
+  bucheon: [
+    { key: "haengjeong", label: "일반행정" },
+    { key: "geonchuk", label: "건축" },
+    { key: "tomok", label: "토목" },
+    { key: "semu", label: "세무" },
+    { key: "ganho", label: "간호" },
+    { key: "bogeon", label: "보건" },
+    { key: "sahoebokji", label: "사회복지" },
+    { key: "jeonsan", label: "전산" },
+    { key: "hwangyeong", label: "환경" },
+  ],
+  anseong: [
+    { key: "haengjeong", label: "일반행정" },
+    { key: "geonchuk", label: "건축" },
+    { key: "tomok", label: "토목" },
+    { key: "semu", label: "세무" },
+    { key: "ganho", label: "간호" },
+    { key: "bogeon", label: "보건" },
+    { key: "sahoebokji", label: "사회복지" },
+    { key: "jeonsan", label: "전산" },
+    { key: "hwangyeong", label: "환경" },
+  ],
 };
 
 // 카테고리별 series 정의

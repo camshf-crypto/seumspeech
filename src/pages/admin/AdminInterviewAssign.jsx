@@ -78,7 +78,7 @@ export default function AdminInterviewAssign({ students = [] }) {
   return (
     <div>
       <h2 className="mb-1 font-bold text-seum-navy">면접 카테고리 배정</h2>
-      <p className="mb-4 text-sm text-slate-400">학생마다 면접 카테고리를 하나씩 배정하세요. (공무원은 인천/서울 세부 선택)</p>
+      <p className="mb-4 text-sm text-slate-400">학생마다 면접 카테고리를 하나씩 배정하세요. (공무원은 세부 지역까지 선택)</p>
 
       {students.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">학생이 없습니다.</p>

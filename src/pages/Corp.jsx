@@ -50,7 +50,7 @@ export default function Corp() {
               <div key={i} className="group relative overflow-hidden rounded-2xl">
                 <div className="aspect-[4/3]">
                   {p.src ? (
-                    <img src={p.src} alt={p.caption || `교육 현장 ${i + 1}`} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+                    <img src={p.src} alt={p.caption || `교육 현장 ${i + 1}`} className="h-full w-full object-contain" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center bg-slate-100 text-xs text-slate-400">
                       교육 사진 {i + 1}

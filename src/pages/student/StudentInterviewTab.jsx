@@ -4,6 +4,7 @@ import DebateSession from "./DebateSession";
 import UnivQuestionPicker from "./UnivQuestionPicker";
 import Simulation from "./Simulation";
 import MajorQuestions from "./MajorQuestions";
+import PtPractice from "./PtPractice";
 import {
   getCategory,
   getSubLabel,
@@ -22,6 +23,29 @@ const AXES = [
 ];
 
 const GRADE_SCORE = { 상: 3, 중: 2, 하: 1 };
+
+// 지역(sub_key) 구분 없이 함께 쓰는 문항
+// - 공무원(gov)은 지역별로 문항을 따로 만들지 않고 전 지역이 같은 문항을 쓴다.
+// - 그 외 카테고리는 기출·PT·토론만 공통.
+const SHARED_CATEGORIES = ["gov"];
+const SHARED_TABS = ["gichul", "pt", "debate"];
+const isSharedContent = (categoryKey, tabKey) =>
+  SHARED_CATEGORIES.includes(categoryKey) || SHARED_TABS.includes(tabKey);
+
+// 지역별로 같은 문항이 복사돼 들어간 경우가 있다(공직관·기본인성).
+// sub_key 필터를 풀면 같은 질문이 지역 수만큼 중복으로 보이므로,
+// 질문 내용 기준으로 한 벌만 남긴다. 이미 답변이 달린 사본을 우선한다.
+const dedupeByQuestion = (rows) => {
+  const score = (r) =>
+    r?._answer?.student_answer?.trim() ? 2 : r?._answer ? 1 : 0;
+  const byText = new Map();
+  rows.forEach((r) => {
+    const key = (r.question ?? "").trim();
+    const prev = byText.get(key);
+    if (!prev || score(r) > score(prev)) byText.set(key, r);
+  });
+  return Array.from(byText.values());
+};
 
 const PRINT_CSS = `
 @media print {
@@ -454,6 +478,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     if (
       tabKey === "materials" ||
       tabKey === "simulation" ||
+      tabKey === "pt" ||
       (categoryKey === "univ" && tabKey === "major")
     ) {
       setQuestions([]);
@@ -484,11 +509,17 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       .eq("tab_key", tabKey)
       .eq("is_active", true)
       .order("seq");
-    q = subKey ? q.eq("sub_key", subKey) : q.is("sub_key", null);
+    // 기출·PT·토론은 지역(sub_key) 구분 없이 전 지역 공통으로 쓴다.
+    if (!isSharedContent(categoryKey, tabKey)) {
+      q = subKey ? q.eq("sub_key", subKey) : q.is("sub_key", null);
+    }
     if (needsSeries) q = q.eq("series_key", seriesKey);
 
-    const { data: qs } = await q;
-    const merged = await attachAnswers(qs ?? []);
+    const { data: qs, error: qErr } = await q;
+    if (qErr) console.error("interview_questions_v2 조회 실패:", qErr);
+    let merged = await attachAnswers(qs ?? []);
+    // sub_key 필터를 푼 경우에만 중복 제거 (지역별 사본이 합쳐지므로)
+    if (isSharedContent(categoryKey, tabKey)) merged = dedupeByQuestion(merged);
     applyQuestions(merged);
     setLoadingQ(false);
   };
@@ -644,8 +675,9 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const isDebateTab = activeTab === "debate";
   const isSimulationTab = activeTab === "simulation";
   const isMajorTab = isUniv && activeTab === "major";
+  const isPtTab = activeTab === "pt";
   const canPrint =
-    !isMaterialsTab && !isDebateTab && !isSimulationTab && !isMajorTab && questions.length > 0;
+    !isMaterialsTab && !isDebateTab && !isSimulationTab && !isMajorTab && !isPtTab && questions.length > 0;
 
   const fileUrl = (path) =>
     `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/student-files/${encodeURI(path)}`;
@@ -673,6 +705,17 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
     if (isMajorTab) {
       return <MajorQuestions locked={locked} />;
+    }
+
+    if (isPtTab) {
+      return (
+        <PtPractice
+          studentId={studentId}
+          categoryKey={assignment.category_key}
+          subKey={assignment.sub_key}
+          locked={locked}
+        />
+      );
     }
 
     if (isMaterialsTab) {
@@ -845,6 +888,8 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
             ? "실전처럼 면접관 앞에서 답변을 녹음하고 피드백을 받습니다."
             : isMajorTab
             ? "학과를 선택하고 Day별 문제를 풀면 정답과 해설을 바로 확인할 수 있습니다."
+            : isPtTab
+            ? "제시문을 읽고 개요를 작성한 뒤, 실제처럼 발표를 녹음하고 피드백을 받습니다."
             : "작성 중인 내용은 자동 저장됩니다. 저장 버튼을 눌러야 선생님께 전달됩니다."}
         </p>
       </div>

@@ -47,7 +47,7 @@ export default function ClassInterviewAssign({ branchId }) {
   const save = async () => {
     if (!category) return alert("카테고리를 선택하세요.");
     const cat = getCategory(category);
-    if (cat?.subs?.length && !sub) return alert("세부(인천/서울)를 선택하세요.");
+    if (cat?.subs?.length && !sub) return alert("세부 지역을 선택하세요.");
     setSaving(true);
     const now = new Date().toISOString();
     const { error } = await supabase

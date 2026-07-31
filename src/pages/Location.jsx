@@ -1,5 +1,4 @@
 import { LOCATION } from "../config";
-import { Img } from "../components/common";
 
 export default function LocationPage() {
   const branches = LOCATION.branches;
@@ -53,7 +52,13 @@ export default function LocationPage() {
               <div className="mt-10 grid gap-6 sm:grid-cols-2">
                 {L.rooms.map((r, i) => (
                   <div key={i}>
-                    <Img src={r.src} alt={r.caption} label={`${r.caption} 사진`} className="h-64 w-full rounded-2xl object-cover" />
+                    <div className="flex h-64 w-full items-center justify-center overflow-hidden rounded-2xl bg-white">
+                      {r.src ? (
+                        <img src={r.src} alt={r.caption} className="h-full w-full object-contain" />
+                      ) : (
+                        <span className="text-sm text-slate-300">{r.caption} 사진</span>
+                      )}
+                    </div>
                     <p className="mt-3 text-center text-sm font-medium text-slate-600">{r.caption}</p>
                   </div>
                 ))}

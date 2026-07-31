@@ -29,7 +29,7 @@ export default function InterviewAbout() {
           <div className="grid gap-10 md:grid-cols-[300px_1fr]">
             <div>
               {principalImg ? (
-                <img src={principalImg} alt="원장" className="h-96 w-full rounded-2xl object-cover" />
+                <img src={principalImg} alt="원장" className="block h-auto w-full rounded-2xl object-contain" />
               ) : (
                 <div className="flex h-96 w-full items-center justify-center rounded-2xl bg-slate-100 text-sm text-slate-400">
                   원장 사진

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { ABOUT } from "../config";
-import { Img } from "../components/common";
 import { supabase } from "../lib/supabase";
 
 const ICONS = [
@@ -36,12 +35,13 @@ export default function About() {
 
       <section className="py-20">
         <div className="mx-auto grid max-w-5xl items-center gap-12 px-6 md:grid-cols-2">
-          <Img
-            src={principalImg || ABOUT.principalImg}
-            alt="세움스피치 원장 김지윤"
-            label="원장 사진"
-            className="mx-auto h-[440px] w-full max-w-sm rounded-2xl object-cover object-top"
-          />
+          <div className="mx-auto w-full max-w-sm overflow-hidden rounded-2xl bg-white">
+            <img
+              src={principalImg || ABOUT.principalImg}
+              alt="세움스피치 원장 김지윤"
+              className="block h-auto w-full object-contain"
+            />
+          </div>
           <div>
             <p className="mb-2 text-sm font-medium text-slate-400">세움스피치</p>
             <h2 className="mb-8 text-3xl font-extrabold leading-tight text-slate-800">

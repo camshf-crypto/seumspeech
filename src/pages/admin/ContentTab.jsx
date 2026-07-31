@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
 // ════════════════════════════════════════════════
@@ -93,153 +93,189 @@ const SITE_TABS = [
 ];
 
 // ════════════════════════════════════════════════
-//  크롭 편집 모달 — 드래그로 위치 이동 + 슬라이더로 확대
+//  업로드 용량 제한
+//  - 원본은 최대 30MB까지 받음
+//  - 일반 사진은 최대 1.5MB로 압축
+//  - 로고는 최대 1MB를 목표로 축소
 // ════════════════════════════════════════════════
-function CropModal({ file, cropType, onCancel, onConfirm }) {
-  const size = CROP_SIZES[cropType] || CROP_SIZES.photo;
-  const boxW = 420;                       // 미리보기 가로(px)
-  const boxH = Math.round(boxW * size.h / size.w); // 비율 맞춘 세로
+const MAX_SOURCE_FILE_BYTES = 30 * 1024 * 1024;
+const MAX_PHOTO_FILE_BYTES = 1.5 * 1024 * 1024;
+const MAX_LOGO_FILE_BYTES = 1 * 1024 * 1024;
 
-  const [imgEl, setImgEl] = useState(null);
-  const [imgUrl, setImgUrl] = useState(null);      // 화면 표시용 data URL
-  const [zoom, setZoom] = useState(1);
-  const [pos, setPos] = useState({ x: 0, y: 0 });   // 이미지 좌상단 오프셋(px)
-  const drag = useRef(null);
-
-  // 이미지 로드 — blob URL(createObjectURL) 대신 FileReader data URL 사용.
-  // blob 주소는 해제(revoke) 타이밍에 따라 ERR_FILE_NOT_FOUND가 나므로 아예 쓰지 않는다.
-  // StrictMode(개발모드)에서 effect가 두 번 도는 경우를 대비해 cancelled 플래그 사용.
-  useEffect(() => {
-    let cancelled = false;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const im = new Image();
-      im.onload = () => {
-        if (cancelled) return;
-        setImgEl(im);
-        setImgUrl(reader.result);
-      };
-      im.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-    return () => { cancelled = true; };
-  }, [file]);
-
-  // 박스를 채우는 기본 스케일(cover)
-  const baseScale = imgEl ? Math.max(boxW / imgEl.width, boxH / imgEl.height) : 1;
-  const dispW = imgEl ? imgEl.width * baseScale * zoom : 0;
-  const dispH = imgEl ? imgEl.height * baseScale * zoom : 0;
-
-  // 초기 위치 = 가운데
-  useEffect(() => {
-    if (imgEl) setPos({ x: (boxW - dispW) / 2, y: (boxH - dispH) / 2 });
-    // eslint-disable-next-line
-  }, [imgEl]);
-
-  // 이미지가 박스 밖으로 빠지지 않게 제한
-  const clamp = (x, y) => ({
-    x: Math.min(0, Math.max(boxW - dispW, x)),
-    y: Math.min(0, Math.max(boxH - dispH, y)),
-  });
-
-  const onDown = (e) => {
-    const p = e.touches ? e.touches[0] : e;
-    drag.current = { sx: p.clientX, sy: p.clientY, ox: pos.x, oy: pos.y };
-  };
-  const onMove = (e) => {
-    if (!drag.current) return;
-    const p = e.touches ? e.touches[0] : e;
-    const nx = drag.current.ox + (p.clientX - drag.current.sx);
-    const ny = drag.current.oy + (p.clientY - drag.current.sy);
-    setPos(clamp(nx, ny));
-  };
-  const onUp = () => { drag.current = null; };
-
-  // zoom 바뀌면 위치 재보정
-  useEffect(() => { setPos((p) => clamp(p.x, p.y)); // eslint-disable-next-line
-  }, [zoom]);
-
-  const doConfirm = () => {
-    if (!imgEl) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = size.w;
-    canvas.height = size.h;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, size.w, size.h);
-
-    // 미리보기 박스(boxW×boxH)에 보이는 영역을, 원본 이미지 좌표계로 역산해서 잘라 그림
-    // 미리보기에서 이미지는 (pos.x, pos.y) 위치에 dispW×dispH 크기로 그려져 있음.
-    // 박스(0,0 ~ boxW,boxH)에 해당하는 "원본 이미지 상의 영역"을 구한다.
-    const scale = dispW / imgEl.width; // 원본 → 미리보기 표시 배율
-    // 박스 좌상단(0,0)이 원본 이미지의 어느 좌표인지
-    const srcX = (0 - pos.x) / scale;
-    const srcY = (0 - pos.y) / scale;
-    const srcW = boxW / scale;
-    const srcH = boxH / scale;
-
-    ctx.drawImage(
-      imgEl,
-      srcX, srcY, srcW, srcH,   // 원본에서 잘라올 영역
-      0, 0, size.w, size.h      // 캔버스에 채울 영역
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("사진 변환에 실패했습니다."));
+          return;
+        }
+        resolve(blob);
+      },
+      type,
+      quality
     );
+  });
+}
 
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const out = new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
-      onConfirm(out);
-    }, "image/jpeg", 0.85);
-  };
+// JPEG 품질을 낮추고, 그래도 크면 이미지 자체를 조금씩 줄여
+// 최대 파일 용량 안으로 맞춘다.
+async function exportJpegWithinLimit(sourceCanvas, maxBytes) {
+  let canvas = sourceCanvas;
+  const qualities = [0.88, 0.82, 0.76, 0.7, 0.64];
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onMouseUp={onUp} onMouseMove={onMove} onTouchMove={onMove} onTouchEnd={onUp}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-5">
-        <h3 className="mb-1 font-bold text-seum-navy">사진 위치 조정</h3>
-        <p className="mb-3 text-xs text-slate-400">드래그해서 위치를 옮기고, 아래 막대로 확대/축소하세요. 파란 테두리 안이 실제로 보이는 영역입니다.</p>
+  for (let resizeRound = 0; resizeRound < 5; resizeRound += 1) {
+    for (const quality of qualities) {
+      const blob = await canvasToBlob(canvas, "image/jpeg", quality);
+      if (blob.size <= maxBytes) return blob;
+    }
 
-        <div className="mx-auto overflow-hidden rounded-xl ring-2 ring-seum-blue" style={{ width: boxW, height: boxH, position: "relative", touchAction: "none", cursor: "move" }}
-          onMouseDown={onDown} onTouchStart={onDown}>
-          {imgEl && imgUrl ? (
-            <img src={imgUrl} alt="crop" draggable={false}
-              style={{ position: "absolute", left: pos.x, top: pos.y, width: dispW, height: dispH, maxWidth: "none", userSelect: "none" }} />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-slate-400">불러오는 중...</div>
-          )}
-        </div>
+    const nextWidth = Math.max(1, Math.round(canvas.width * 0.88));
+    const nextHeight = Math.max(1, Math.round(canvas.height * 0.88));
+    const smallerCanvas = document.createElement("canvas");
+    smallerCanvas.width = nextWidth;
+    smallerCanvas.height = nextHeight;
 
-        <div className="mt-4 flex items-center gap-2">
-          <span className="text-xs text-slate-400">축소</span>
-          <input type="range" min="1" max="3" step="0.01" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="flex-1 accent-seum-blue" />
-          <span className="text-xs text-slate-400">확대</span>
-        </div>
+    const context = smallerCanvas.getContext("2d");
+    if (!context) throw new Error("사진 처리 기능을 사용할 수 없습니다.");
 
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-500 hover:bg-slate-50">취소</button>
-          <button onClick={doConfirm} disabled={!imgEl} className="rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-50">이 위치로 저장</button>
-        </div>
-      </div>
-    </div>
-  );
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(canvas, 0, 0, nextWidth, nextHeight);
+    canvas = smallerCanvas;
+  }
+
+  // 극단적으로 큰 이미지도 업로드 자체가 막히지 않도록 마지막 결과를 반환
+  return canvasToBlob(canvas, "image/jpeg", 0.6);
 }
 
 // ════════════════════════════════════════════════
-//  로고용 — 크롭 없이 리사이즈만 (비율 유지, 가로 최대 600)
+//  일반 사진용 — 원본 비율을 그대로 유지하며 크기만 축소
+//  고정 비율 캔버스, 크롭, 흰 여백을 만들지 않는다.
+// ════════════════════════════════════════════════
+function resizePhotoOriginalRatio(file, cropType) {
+  return new Promise((resolve, reject) => {
+    if (file.size > MAX_SOURCE_FILE_BYTES) {
+      reject(new Error("원본 사진은 30MB 이하만 업로드할 수 있습니다."));
+      return;
+    }
+
+    const target = CROP_SIZES[cropType] || CROP_SIZES.photo;
+    const reader = new FileReader();
+
+    reader.onerror = () => reject(new Error("사진 파일을 읽지 못했습니다."));
+    reader.onload = () => {
+      const image = new Image();
+
+      image.onerror = () => reject(new Error("사진을 불러오지 못했습니다."));
+      image.onload = async () => {
+        try {
+          // 원본보다 키우지 않고, 슬롯별 최대 크기 안으로만 줄인다.
+          // 가로·세로 비율은 그대로 유지한다.
+          const scale = Math.min(
+            1,
+            target.w / image.naturalWidth,
+            target.h / image.naturalHeight
+          );
+
+          const width = Math.max(1, Math.round(image.naturalWidth * scale));
+          const height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("사진 처리 기능을 사용할 수 없습니다.");
+
+          context.imageSmoothingEnabled = true;
+          context.imageSmoothingQuality = "high";
+          context.drawImage(image, 0, 0, width, height);
+
+          // 일반 콘텐츠 사진은 JPEG로 통일해 저장 용량을 제한한다.
+          const blob = await exportJpegWithinLimit(
+            canvas,
+            MAX_PHOTO_FILE_BYTES
+          );
+
+          const outputName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+          resolve(
+            new File([blob], outputName, {
+              type: "image/jpeg",
+              lastModified: Date.now(),
+            })
+          );
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      image.src = reader.result;
+    };
+
+    reader.readAsDataURL(file);
+  });
+}
+
+// ════════════════════════════════════════════════
+//  로고용 — 원본 비율 유지, 가로 최대 600px
+//  투명 배경을 살리기 위해 PNG를 우선 사용한다.
 // ════════════════════════════════════════════════
 function resizeLogo(file) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    if (file.size > MAX_SOURCE_FILE_BYTES) {
+      reject(new Error("원본 로고는 30MB 이하만 업로드할 수 있습니다."));
+      return;
+    }
+
     const reader = new FileReader();
+    reader.onerror = () => reject(new Error("로고 파일을 읽지 못했습니다."));
     reader.onload = () => {
-      const im = new Image();
-      im.onload = () => {
-        const maxW = 600;
-        const scale = Math.min(1, maxW / im.width);
-        const canvas = document.createElement("canvas");
-        canvas.width = im.width * scale;
-        canvas.height = im.height * scale;
-        canvas.getContext("2d").drawImage(im, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((blob) => resolve(new File([blob], file.name.replace(/\.[^.]+$/, "") + ".png", { type: "image/png" })), "image/png");
+      const image = new Image();
+      image.onerror = () => reject(new Error("로고 이미지를 불러오지 못했습니다."));
+      image.onload = async () => {
+        try {
+          const maxWidth = 600;
+          const scale = Math.min(1, maxWidth / image.naturalWidth);
+          const width = Math.max(1, Math.round(image.naturalWidth * scale));
+          const height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("로고 처리 기능을 사용할 수 없습니다.");
+
+          context.imageSmoothingEnabled = true;
+          context.imageSmoothingQuality = "high";
+          context.drawImage(image, 0, 0, width, height);
+
+          let blob = await canvasToBlob(canvas, "image/png");
+          let extension = "png";
+          let type = "image/png";
+
+          // 복잡한 PNG라 1MB를 넘는 경우, 투명 배경을 유지하는 WebP로 경량화한다.
+          if (blob.size > MAX_LOGO_FILE_BYTES) {
+            blob = await canvasToBlob(canvas, "image/webp", 0.9);
+            extension = "webp";
+            type = "image/webp";
+          }
+
+          const outputName =
+            file.name.replace(/\.[^.]+$/, "") + "." + extension;
+
+          resolve(
+            new File([blob], outputName, {
+              type,
+              lastModified: Date.now(),
+            })
+          );
+        } catch (error) {
+          reject(error);
+        }
       };
-      im.src = reader.result;
+      image.src = reader.result;
     };
     reader.readAsDataURL(file);
   });
@@ -250,7 +286,6 @@ export default function ContentTab() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [siteTab, setSiteTab] = useState("speech");
-  const [cropTarget, setCropTarget] = useState(null); // { slotObj, file }
 
   const current = SITE_TABS.find((t) => t.key === siteTab);
   const realSlot = (slot) => current.prefix + slot;
@@ -270,14 +305,22 @@ export default function ContentTab() {
   };
   useEffect(() => { load(); }, []);
 
-  // 파일 선택 → 로고면 바로 업로드, 아니면 크롭 모달 열기
+  // 파일 선택 → 원본 비율을 유지한 채 크기만 줄여 바로 업로드
   const onPick = async (slotObj, file) => {
     if (!file) return;
-    if (slotObj.crop === "logo") {
-      const resized = await resizeLogo(file);
-      await doUpload(slotObj, resized);
-    } else {
-      setCropTarget({ slotObj, file });
+
+    try {
+      setBusy(realSlot(slotObj.slot));
+
+      const finalFile =
+        slotObj.crop === "logo"
+          ? await resizeLogo(file)
+          : await resizePhotoOriginalRatio(file, slotObj.crop);
+
+      await doUpload(slotObj, finalFile);
+    } catch (error) {
+      alert("사진 처리 실패: " + error.message);
+      setBusy("");
     }
   };
 
@@ -323,7 +366,7 @@ export default function ContentTab() {
   return (
     <div>
       <h2 className="mb-1 font-bold text-seum-navy">콘텐츠 관리</h2>
-      <p className="mb-4 text-sm text-slate-400">사진을 올린 뒤 위치를 직접 조정할 수 있습니다. 조정 후 저장하면 홈페이지에 바로 반영됩니다.</p>
+      <p className="mb-4 text-sm text-slate-400">사진을 올리면 원본 비율을 유지한 채 슬롯별 최대 크기와 1.5MB 이하로 자동 최적화되어 홈페이지에 바로 반영됩니다.</p>
 
       <div className="mb-6 flex gap-2">
         {SITE_TABS.map((t) => (
@@ -335,8 +378,8 @@ export default function ContentTab() {
       </div>
 
       <div className="mb-6 rounded-xl border border-seum-blue/20 bg-seum-blue/5 p-4 text-sm text-slate-600">
-        <b className="text-seum-navy">✂️ 사진 위치 직접 조정</b><br />
-        사진을 선택하면 편집 창이 열립니다. <b>드래그로 위치를 옮기고, 막대로 확대/축소</b>해서 원하는 부분을 맞춘 뒤 저장하세요. (로고는 조정 없이 바로 올라갑니다)
+        <b className="text-seum-navy">🖼️ 원본 비율 그대로 업로드</b><br />
+        사진은 자르거나 흰 여백을 추가하지 않습니다. <b>가로·세로 비율을 그대로 유지하면서 크기와 용량만 자동으로 줄여</b> 저장합니다. 일반 사진은 최대 1.5MB, 원본 업로드는 30MB까지 가능합니다.
       </div>
 
       <div className="space-y-8">
@@ -351,7 +394,7 @@ export default function ContentTab() {
                 return (
                   <div key={s.slot} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
                     <div className="flex h-16 w-20 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                      {img?.image_url ? <img src={img.image_url} alt={s.label} className="h-full w-full object-cover" /> : <span className="text-[10px] text-slate-300">없음</span>}
+                      {img?.image_url ? <img src={img.image_url} alt={s.label} className="h-full w-full object-contain" /> : <span className="text-[10px] text-slate-300">없음</span>}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold text-seum-navy">{s.label}</p>
@@ -373,18 +416,6 @@ export default function ContentTab() {
         ))}
       </div>
 
-      {cropTarget && (
-        <CropModal
-          file={cropTarget.file}
-          cropType={cropTarget.slotObj.crop}
-          onCancel={() => setCropTarget(null)}
-          onConfirm={async (croppedFile) => {
-            const target = cropTarget;
-            setCropTarget(null);
-            await doUpload(target.slotObj, croppedFile);
-          }}
-        />
-      )}
     </div>
   );
 }

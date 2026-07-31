@@ -117,7 +117,7 @@ export default function ApprovalTab() {
 
               <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-slate-100 pt-3 text-sm sm:grid-cols-3">
                 {r.birth ? (
-                  <div><span className="text-slate-400">생년월일 </span><span className="text-slate-700">{fmtDate(r.birth)}</span></div>
+                  <div><span className="text-slate-400"> </span><span className="text-slate-700">{fmtDate(r.birth)}</span></div>
                 ) : null}
                 {r.branch_id ? (
                   <div><span className="text-slate-400">지점 </span><span className="text-slate-700">{branchMap[r.branch_id] ?? "-"}</span></div>

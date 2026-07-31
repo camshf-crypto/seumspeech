@@ -78,7 +78,7 @@ export default function Enroll() {
                         src={c.img}
                         alt={c.teacher}
                         label="강사 사진"
-                        className="h-56 w-full object-cover"
+                        className="h-56 w-full bg-white object-contain"
                       />
                       <Badge type={c.badge} />
                     </div>

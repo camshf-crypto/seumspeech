@@ -8,6 +8,7 @@ const ITEMS = [
   { slot: "gallery4", caption: "소수정예 그룹 수업" },
 ];
 
+// 콘텐츠 관리에서 업로드한 사진은 비율이 달라도 전체가 보이도록 object-contain으로 표시
 function GalleryCard({ slot, caption }) {
   const img = useSiteImage(slot);
   return (
@@ -17,7 +18,7 @@ function GalleryCard({ slot, caption }) {
           <img
             src={img}
             alt={caption}
-            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+            className="h-full w-full bg-white object-contain"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-sm text-slate-400">
