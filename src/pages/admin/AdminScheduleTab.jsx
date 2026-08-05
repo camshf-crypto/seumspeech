@@ -101,14 +101,47 @@ export default function AdminScheduleTab({ branchId }) {
 
   const slotsOnDate = (ds) =>
     slots.filter((s) => s.date === ds && filterTeacher(s.teacher_id) && s.branch_id === branchId);
-  const coursesOnDate = (ds) => {
+  // 정규 단체반은 courses의 요일 설정으로 그린다.
+  // weekdays(배열, 주 N회)가 있으면 그걸 쓰고 없으면 weekday(단수) 하나만 본다.
+  // 개강일 이전과 종강일(개강일 + 주차수) 이후는 그리지 않는다.
+  const courseRunsOn = (c, ds) => {
     const wd = new Date(ds).getDay();
-    return courses.filter(
-      (c) => c.weekday === wd && c.branch_id === branchId && filterTeacher(c.teacher_id)
-    );
+
+    const hitsWeekday =
+      Array.isArray(c.weekdays) && c.weekdays.length > 0
+        ? c.weekdays.includes(wd)
+        : c.weekday === wd;
+    if (!hitsWeekday) return false;
+
+    if (c.start_date && ds < c.start_date) return false;
+
+    if (c.start_date && c.weeks) {
+      const end = new Date(c.start_date);
+      end.setDate(end.getDate() + c.weeks * 7 - 1);
+      const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+      if (ds > endStr) return false;
+    }
+
+    return true;
   };
+
+  const coursesOnDate = (ds) =>
+    courses.filter(
+      (c) => courseRunsOn(c, ds) && c.branch_id === branchId && filterTeacher(c.teacher_id)
+    );
+  // 단체반은 아래 "정규 단체반"에서 courses 기준으로 그리므로,
+  // lesson_bookings 에 들어온 단체반 예약(학생 없이 course_id만 있는 행)은 여기서 뺀다.
+  // 안 그러면 같은 수업이 캘린더에 두 번 뜬다.
+  const isGroupBooking = (b) => !!b.course_id && !b.student_id;
+
   const bookingsOnDate = (ds) =>
-    bookings.filter((b) => b.date === ds && filterTeacher(b.teacher_id) && b.branch_id === branchId);
+    bookings.filter(
+      (b) =>
+        b.date === ds &&
+        !isGroupBooking(b) &&
+        filterTeacher(b.teacher_id) &&
+        b.branch_id === branchId,
+    );
   const consultsOnDate = (ds) =>
     consults.filter((c) => {
       if (!c.scheduled_at) return false;
@@ -216,7 +249,6 @@ export default function AdminScheduleTab({ branchId }) {
                 <div key={b.id} className="rounded-lg bg-blue-50 px-3 py-2 text-sm">
                   <p className="font-medium text-seum-blue">
                     {b.start_time?.slice(0, 5)}{b.end_time ? `~${b.end_time.slice(0, 5)}` : ""} · {b.student?.name ?? b.course?.title ?? "수업"}
-                    {b.course_id && !b.student_id ? <span className="ml-1 text-[11px] text-slate-400">(단체반)</span> : null}
                     {badge ? <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[11px] font-bold ${badge.cls}`}>{badge.label}</span> : null}
                     {rm && rm.remainAfter != null ? (
                       <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-bold text-seum-blue">{rm.remainAfter}/{rm.total}회</span>
