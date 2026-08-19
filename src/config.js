@@ -3,6 +3,7 @@
 //  사진은 public/images/ 폴더에 넣고 경로를 적으면 됩니다.
 //  예) heroBg: "/images/hero.jpg"
 //  비워두면("") 회색 자리표시가 보입니다.
+//  ※ 콘텐츠 관리(어드민)에서 올린 사진이 있으면 그쪽이 우선 적용됩니다.
 // ════════════════════════════════════════════════
 
 export const IMAGES = {
@@ -19,12 +20,12 @@ export const IMAGES = {
 };
 
 export const LINKS = {
-  online: "#",                 // 온라인 문의하기 주소
-  schedule: "#",               // 개강일정 확인하기 주소
-  kakao: "#",                  // 카카오톡 상담 (오픈채팅/채널 주소)
-  enroll: "/enroll",           // 수강신청 페이지
-  tel: "02-2662-0991",         // 상담 전화번호
-  interview: "/interview",     // ★ 세움면접 사이트
+  online: "/consult",                          // 온라인 문의하기 → 상담 문의 페이지
+  schedule: "/enroll",                         // 개강일정 확인하기 → 수강신청 페이지
+  kakao: "http://pf.kakao.com/_YyATxb/chat",   // 카카오톡 상담 (채널 채팅)
+  enroll: "/enroll",                           // 수강신청 페이지
+  tel: "02-2662-0991",                         // 상담 전화번호
+  interview: "/interview",                     // ★ 세움면접 사이트
 };
 
 export const NAV = [
