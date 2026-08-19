@@ -3,8 +3,14 @@ import { useSiteImages } from "../lib/useSiteImage";
 
 export default function Hero() {
   // 콘텐츠 관리(스피치 사이트 → 기본 → 메인 히어로 배경) 우선, 없으면 config
-  const { img } = useSiteImages();
+  const { img, loading } = useSiteImages();
   const heroSrc = img("heroBg", IMAGES.heroBg || "");
+
+  // 사진 주소를 아직 불러오는 중 — 남색이나 흰 글씨가 번쩍이지 않도록
+  // 자리만 잡아두고 아무것도 그리지 않는다.
+  if (loading) {
+    return <section className="pt-16"><div className="min-h-[70vh] w-full" /></section>;
+  }
 
   return (
     <section className="pt-16">
@@ -24,24 +30,24 @@ export default function Hero() {
         {/* 사진 위에 겹치는 글씨 */}
         <div className="absolute inset-0 flex items-center">
           <div className="mx-auto w-full max-w-6xl px-6">
-            <p className="mb-3 text-lg font-light text-white/95 md:text-2xl">수학에 공식이 있다면</p>
-            <h1 className="mb-6 text-2xl font-extrabold leading-tight text-white sm:text-4xl md:mb-10 md:text-5xl">
+            <p className="mb-1 text-xs font-light text-white/95 drop-shadow sm:mb-3 sm:text-lg md:text-2xl">수학에 공식이 있다면</p>
+            <h1 className="mb-3 text-base font-extrabold leading-tight text-white drop-shadow sm:mb-6 sm:text-4xl md:mb-10 md:text-5xl">
               스피치에는 <span className="text-sky-300">패턴</span>이 있습니다!
             </h1>
 
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex flex-row gap-2 sm:gap-3">
               <a
                 href={LINKS.online}
-                className="group inline-flex items-center justify-between gap-6 bg-white/10 px-7 py-4 text-white backdrop-blur-sm transition hover:bg-white/20"
+                className="group inline-flex items-center justify-between gap-1.5 bg-white/10 px-3 py-1.5 text-white backdrop-blur-sm transition hover:bg-white/20 sm:gap-6 sm:px-7 sm:py-4"
               >
-                <span className="text-base font-semibold">온라인 문의하기</span>
+                <span className="text-[11px] font-semibold sm:text-base">온라인 문의하기</span>
                 <span className="transition group-hover:translate-x-1">→</span>
               </a>
               <a
                 href={LINKS.schedule}
-                className="group inline-flex items-center justify-between gap-6 bg-seum-blue px-7 py-4 text-white transition hover:bg-[#2a63c4]"
+                className="group inline-flex items-center justify-between gap-1.5 bg-seum-blue px-3 py-1.5 text-white transition hover:bg-[#2a63c4] sm:gap-6 sm:px-7 sm:py-4"
               >
-                <span className="text-base font-semibold">개강일정 확인하기</span>
+                <span className="text-[11px] font-semibold sm:text-base">개강일정 확인하기</span>
                 <span className="transition group-hover:translate-x-1">→</span>
               </a>
             </div>

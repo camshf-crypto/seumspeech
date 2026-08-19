@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { COURSES } from "../config";
-import { Img } from "./common";
 
 const CalIcon = (p) => (
   <svg viewBox="0 0 24 24" fill="none" {...p}>
@@ -15,24 +14,17 @@ const ClockIcon = (p) => (
   </svg>
 );
 
+// 사진을 없앴으므로 동그란 뱃지 대신 카드 우상단에 작은 라벨로 표시
 function Badge({ type }) {
   if (!type) return null;
   const isClosed = type === "마감";
   return (
     <span
-      className={`absolute -bottom-3 right-4 flex h-12 w-12 items-center justify-center rounded-full text-[11px] font-bold leading-tight text-white shadow-md ${
+      className={`absolute right-4 top-4 px-2.5 py-1 text-[11px] font-bold text-white ${
         isClosed ? "bg-slate-500" : "bg-[#7c4dcf]"
       }`}
     >
-      {type === "마감임박" ? (
-        <span className="text-center">
-          마감
-          <br />
-          임박
-        </span>
-      ) : (
-        type
-      )}
+      {type}
     </span>
   );
 }
@@ -72,19 +64,12 @@ export default function Enroll() {
             >
               {COURSES.map((c, i) => (
                 <div key={i} className="w-full flex-shrink-0 px-3 sm:w-1/2 md:w-1/4">
-                  <div className="overflow-hidden rounded-2xl bg-white shadow-sm transition hover:shadow-md">
-                    <div className="relative">
-                      <Img
-                        src={c.img}
-                        alt={c.teacher}
-                        label="강사 사진"
-                        className="h-56 w-full bg-white object-contain"
-                      />
-                      <Badge type={c.badge} />
-                    </div>
+                  {/* 강사 사진 영역은 제거 — 강의 정보만 보여준다 */}
+                  <div className="relative overflow-hidden bg-white shadow-sm transition hover:shadow-md">
+                    <Badge type={c.badge} />
 
                     <div className="px-5 pb-6 pt-7">
-                      <h3 className="mb-1 text-lg font-bold text-slate-800">{c.title}</h3>
+                      <h3 className="mb-1 pr-16 text-lg font-bold text-slate-800">{c.title}</h3>
                       <p className="mb-4 text-sm text-slate-400">{c.teacher}</p>
 
                       <div className="mb-1 flex items-center gap-2 text-sm text-slate-600">
@@ -99,7 +84,7 @@ export default function Enroll() {
                       <button
                         onClick={() => (window.location.href = "/enroll")}
                         disabled={c.badge === "마감"}
-                        className={`w-full rounded-lg py-2.5 text-sm font-semibold transition ${
+                        className={`w-full py-2.5 text-sm font-semibold transition ${
                           c.badge === "마감"
                             ? "cursor-not-allowed bg-slate-200 text-slate-400"
                             : "bg-seum-navy text-white hover:bg-[#24386f]"
