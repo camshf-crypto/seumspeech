@@ -9,6 +9,7 @@ export default function InterviewHeader() {
   const [mobileSub, setMobileSub] = useState(null);
   const { user, role, signOut } = useAuth();
 
+  // 콘텐츠 관리(면접 사이트 → 기본 → 로고) 슬롯
   const logo = useSiteImage("interview_logo");
 
   const go = (href) => {
@@ -41,15 +42,12 @@ export default function InterviewHeader() {
           </span>
         </button>
 
-        {/* 로고 (가운데) */}
-        <button onClick={() => go("/interview")} className="flex flex-shrink-0 items-center gap-2 lg:absolute lg:left-1/2 lg:-translate-x-1/2 lg:transform">
+        {/* 로고 (가운데) — 이미지 한 장만 표시. 없을 때만 글자로 대체 */}
+        <button onClick={() => go("/interview")} className="flex flex-shrink-0 items-center lg:absolute lg:left-1/2 lg:-translate-x-1/2 lg:transform">
           {logo ? (
-            <img src={logo} alt="세움면접" className="h-10 w-auto" />
+            <img src={logo} alt="세움면접" className="h-14 w-auto object-contain" />
           ) : (
-            <span className="leading-tight text-left">
-              <span className="block text-[10px] tracking-widest text-slate-400">SEUM INTERVIEW</span>
-              <span className="block text-xl font-bold text-seum-navy">세움면접</span>
-            </span>
+            <span className="text-xl font-bold text-seum-navy">세움면접</span>
           )}
         </button>
 

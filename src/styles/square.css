@@ -1,0 +1,34 @@
+/* ════════════════════════════════════════════════
+   전역 각진 모서리 (세움스피치 공개 사이트)
+
+   Tailwind의 rounded-* 로 붙은 둥근 모서리를 전부 0으로 만든다.
+   원래대로 되돌리려면 main.jsx 에서 이 파일 import 한 줄만 지우면 된다.
+
+   ⚠️ rounded-full 은 일부러 제외했다.
+      프로세스 번호 원, 프로필 사진 같은 "동그라미"까지 네모가 되면
+      오히려 어색해진다. 그것까지 각지게 하려면 맨 아래 주석을 풀 것.
+   ════════════════════════════════════════════════ */
+
+[class*="rounded"]:not([class*="rounded-full"]) {
+  border-radius: 0 !important;
+}
+
+/* 버튼·입력창도 각지게 */
+button,
+input,
+select,
+textarea {
+  border-radius: 0 !important;
+}
+
+/* 지도 iframe 처럼 컨테이너가 잘라내던 곳도 각지게 */
+iframe,
+img {
+  border-radius: 0 !important;
+}
+
+/* 동그라미까지 전부 네모로 만들고 싶으면 아래 주석을 푸세요
+[class*="rounded-full"] {
+  border-radius: 0 !important;
+}
+*/

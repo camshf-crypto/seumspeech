@@ -1,12 +1,17 @@
 import { useState } from "react";
 import { IMAGES, LINKS, NAV } from "../config";
 import { useAuth } from "../contexts/AuthContext";
+import { useSiteImages } from "../lib/useSiteImage";
 
 export default function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [mobileSub, setMobileSub] = useState(null);
   const { user, role, signOut } = useAuth();
+
+  // 콘텐츠 관리(스피치 사이트 → 기본 → 로고)에서 올린 이미지가 우선
+  const { img } = useSiteImages();
+  const logoSrc = img("logo", IMAGES.logo || "");
 
   const go = (href) => {
     if (href && href !== "#") window.location.href = href;
@@ -32,31 +37,19 @@ export default function Header() {
           onClick={() => go(LINKS.interview)}
           className="hidden flex-shrink-0 items-center gap-3 transition hover:opacity-80 lg:ml-11 lg:flex"
         >
-          {IMAGES.interviewBanner ? (
-            <img src={IMAGES.interviewBanner} alt="면접 교육과정" className="h-12 w-auto" />
-          ) : (
-            <span className="flex h-12 w-16 items-center justify-center rounded-lg bg-slate-100 text-[9px] text-slate-400">사진</span>
-          )}
+          {/* 아이콘·이미지 없이 글자만 */}
           <span className="text-left leading-tight">
             <span className="block text-[15px] font-extrabold text-seum-blue">면접 교육과정</span>
             <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">바로가기 <span className="text-sm">→</span></span>
           </span>
         </button>
 
-        {/* 로고 (가운데) */}
-        <button onClick={() => go("/home")} className="flex flex-shrink-0 items-center gap-2 lg:absolute lg:left-1/2 lg:-translate-x-1/2 lg:transform">
-          {IMAGES.logo ? (
-            <img src={IMAGES.logo} alt="세움스피치" className="h-10 w-auto" />
+        {/* 로고 (가운데) — 이미지 한 장만 표시. 없을 때만 글자로 대체 */}
+        <button onClick={() => go("/home")} className="flex flex-shrink-0 items-center lg:absolute lg:left-1/2 lg:-translate-x-1/2 lg:transform">
+          {logoSrc ? (
+            <img src={logoSrc} alt="세움스피치" className="h-12 w-auto object-contain" />
           ) : (
-            <>
-              <span className="flex h-10 w-10 items-center justify-center rounded bg-seum-navy text-lg font-black text-white">
-                M
-              </span>
-              <span className="leading-tight text-left">
-                <span className="block text-[10px] tracking-widest text-slate-400">SEUM SPEECH</span>
-                <span className="block text-xl font-bold text-seum-navy">세움스피치</span>
-              </span>
-            </>
+            <span className="text-xl font-bold text-seum-navy">세움스피치</span>
           )}
         </button>
 

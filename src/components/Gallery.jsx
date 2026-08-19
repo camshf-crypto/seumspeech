@@ -1,4 +1,4 @@
-import { useSiteImage } from "../lib/useSiteImage";
+import { useSiteImages } from "../lib/useSiteImage";
 
 // 어드민 콘텐츠 관리(스피치 사이트 → 교육현장 갤러리)의 슬롯과 연결
 const ITEMS = [
@@ -8,18 +8,14 @@ const ITEMS = [
   { slot: "gallery4", caption: "소수정예 그룹 수업" },
 ];
 
-// 콘텐츠 관리에서 업로드한 사진은 비율이 달라도 전체가 보이도록 object-contain으로 표시
-function GalleryCard({ slot, caption }) {
-  const img = useSiteImage(slot);
+function GalleryCard({ src, caption }) {
   return (
     <div className="group overflow-hidden rounded-2xl">
-      <div className="relative aspect-square bg-slate-100">
-        {img ? (
-          <img
-            src={img}
-            alt={caption}
-            className="h-full w-full bg-white object-contain"
-          />
+      {/* 칸 비율을 4:3으로 고정해 네 장의 크기를 통일한다 */}
+      <div className="relative aspect-[4/3] bg-slate-100">
+        {src ? (
+          // object-cover: 칸을 꽉 채운다. 비율이 안 맞는 부분은 가운데 기준으로 잘림
+          <img src={src} alt={caption} className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-sm text-slate-400">
             교육 현장 사진
@@ -34,6 +30,9 @@ function GalleryCard({ slot, caption }) {
 }
 
 export default function Gallery() {
+  // 슬롯마다 따로 조회하지 않고 한 번에 읽는다
+  const { img } = useSiteImages();
+
   return (
     <section className="bg-white py-20">
       <div className="mx-auto max-w-6xl px-6">
@@ -44,7 +43,7 @@ export default function Gallery() {
 
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {ITEMS.map((g) => (
-            <GalleryCard key={g.slot} slot={g.slot} caption={g.caption} />
+            <GalleryCard key={g.slot} src={img(g.slot, "")} caption={g.caption} />
           ))}
         </div>
       </div>

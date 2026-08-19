@@ -1,8 +1,23 @@
 import { CORP, LINKS } from "../config";
+import { useSiteImages } from "../lib/useSiteImage";
+
+// 콘텐츠 관리(site_images)의 "기업 교육 현장" 슬롯 8칸
+const CORP_SLOTS = ["corp1", "corp2", "corp3", "corp4", "corp5", "corp6", "corp7", "corp8"];
 
 export default function Corp() {
   const C = CORP;
+  const { img } = useSiteImages();
   const tel = () => (window.location.href = `tel:${LINKS.tel}`);
+
+  // 콘텐츠 관리에서 올린 사진이 우선, 없으면 config.js 값을 쓴다.
+  // config에 항목이 없어도 8칸을 항상 그린다.
+  const photos = CORP_SLOTS.map((slot, i) => {
+    const p = (C.photos || [])[i] || {};
+    return {
+      src: img(slot, "") || p.src || "",
+      caption: p.caption || "",
+    };
+  });
 
   return (
     <div className="bg-white pt-16">
@@ -44,13 +59,14 @@ export default function Corp() {
             ))}
           </div>
 
-          {/* 교육 현장 사진 (4개씩 2줄) */}
+          {/* 교육 현장 사진 (4개씩 2줄) — 콘텐츠 관리 corp1~corp8 */}
           <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {(C.photos || []).map((p, i) => (
+            {photos.map((p, i) => (
               <div key={i} className="group relative overflow-hidden rounded-2xl">
                 <div className="aspect-[4/3]">
                   {p.src ? (
-                    <img src={p.src} alt={p.caption || `교육 현장 ${i + 1}`} className="h-full w-full object-contain" />
+                    // object-cover: 칸을 꽉 채운다. 비율이 안 맞는 부분은 가운데 기준으로 잘림
+                    <img src={p.src} alt={p.caption || `교육 현장 ${i + 1}`} className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center bg-slate-100 text-xs text-slate-400">
                       교육 사진 {i + 1}

@@ -44,7 +44,7 @@ export default function Reviews() {
 
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {list.map((r, i) => (
-              <div key={i} className="flex flex-col rounded-2xl border border-slate-100 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-md">
+              <div key={i} className="flex flex-col border border-slate-100 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-md">
                 <div className="flex flex-1 flex-col">
                   {/* 상단: 카테고리 + 별점 */}
                   <div className="mb-3 flex items-center justify-between">
@@ -82,15 +82,16 @@ export default function Reviews() {
           {list.length === 0 && (
             <p className="py-16 text-center text-slate-400">해당 카테고리의 후기가 없습니다.</p>
           )}
-
-          <div className="mt-14 rounded-3xl bg-seum-navy px-8 py-12 text-center">
-            <h2 className="mb-3 text-2xl font-bold text-white">다음 합격 후기의 주인공은 당신입니다</h2>
-            <p className="mb-7 text-white/70">세움스피치와 함께 확실한 변화를 시작하세요.</p>
-            <button onClick={go} className="rounded-xl bg-white px-8 py-3.5 text-sm font-bold text-seum-navy transition hover:bg-slate-100">
-              수강신청 바로가기
-            </button>
-          </div>
         </div>
+      </section>
+
+      {/* CTA — max-w 컨테이너 밖으로 빼서 화면 좌우 끝까지 채운다 */}
+      <section className="bg-seum-navy px-6 py-20 text-center">
+        <h2 className="mb-3 text-2xl font-bold text-white md:text-3xl">다음 합격 후기의 주인공은 당신입니다</h2>
+        <p className="mb-7 text-white/70">세움스피치와 함께 확실한 변화를 시작하세요.</p>
+        <button onClick={go} className="bg-white px-8 py-3.5 text-sm font-bold text-seum-navy transition hover:bg-slate-100">
+          수강신청 바로가기
+        </button>
       </section>
     </div>
   );

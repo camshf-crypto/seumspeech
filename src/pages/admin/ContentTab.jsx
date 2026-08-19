@@ -44,9 +44,10 @@ const SPEECH_GROUPS = [
     { slot: "gallery3", label: "갤러리 3", hint: "모의 면접 현장 (4:3)", crop: "photo" },
     { slot: "gallery4", label: "갤러리 4", hint: "소수정예 그룹 수업 (4:3)", crop: "photo" },
   ]},
-  { title: "강의실 (오시는 길)", slots: [
-    { slot: "room1", label: "강의실 1", hint: "(4:3)", crop: "photo" },
-    { slot: "room2", label: "강의실 2", hint: "(4:3)", crop: "photo" },
+  // ⚠️ slot 값(room1/room2)은 절대 바꾸지 말 것 — 기존 업로드 사진이 이 키로 연결돼 있음
+  { title: "지점 사진 (오시는 길)", slots: [
+    { slot: "room1", label: "마곡점 사진", hint: "오시는 길 - 첫 번째 지점 (4:3)", crop: "photo" },
+    { slot: "room2", label: "루원시티점 사진", hint: "오시는 길 - 두 번째 지점 (4:3)", crop: "photo" },
   ]},
   { title: "기업 교육 현장", slots: [
     { slot: "corp1", label: "현장 1", hint: "(4:3)", crop: "photo" },
