@@ -39,6 +39,7 @@ export default function Login() {
     }
 
     // 3) 역할별 자동이동
+    //    첫 로그인이라 비밀번호를 바꿔야 하는 경우는 ProtectedRoute 가 가로채 처리한다
     switch (profile.role) {
       case "master":
         navigate("/admin");
@@ -56,7 +57,7 @@ export default function Login() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+      <div className="w-full max-w-sm border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="mb-6 text-center text-2xl font-bold text-seum-navy">
           로그인
         </h1>
@@ -68,7 +69,7 @@ export default function Login() {
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="mb-4 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
+          className="mb-4 w-full border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
           placeholder="example@email.com"
         />
 
@@ -80,7 +81,7 @@ export default function Login() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-          className="mb-4 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
+          className="mb-4 w-full border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
           placeholder="비밀번호"
         />
 
@@ -89,15 +90,15 @@ export default function Login() {
         <button
           onClick={handleLogin}
           disabled={loading}
-          className="w-full rounded-lg bg-seum-blue py-3 font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60"
+          className="w-full bg-seum-blue py-3 font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60"
         >
           {loading ? "로그인 중..." : "로그인"}
         </button>
 
         <p className="mt-5 text-center text-sm text-slate-500">
           아직 회원이 아니신가요?{" "}
-          <Link to="/signup" className="font-semibold text-seum-blue">
-            회원가입
+          <Link to="/join" className="font-semibold text-seum-blue">
+            회원 등록
           </Link>
         </p>
       </div>

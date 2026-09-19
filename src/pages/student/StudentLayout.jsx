@@ -7,7 +7,6 @@ import PaymentsTab from "./PaymentsTab";
 import ChatTab from "./ChatTab";
 import NotificationsTab from "./NotificationsTab";
 import StudentInterviewTab from "./StudentInterviewTab";
-import EnrollmentRequestForm from "./EnrollmentRequestForm";
 import AbsenceRequestTab from "./AbsenceRequestTab";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -29,26 +28,6 @@ export default function StudentLayout() {
   const [hasAssignment, setHasAssignment] = useState(false);
   const [loading, setLoading] = useState(true);
   const [unread, setUnread] = useState(0);
-
-  const [status, setStatus] = useState(null);
-  const [statusLoading, setStatusLoading] = useState(true);
-  const [hasRequest, setHasRequest] = useState(false);
-  const [branches, setBranches] = useState([]);
-
-  const loadStatus = async () => {
-    setStatusLoading(true);
-    const { data: prof } = await supabase.from("profiles").select("status").eq("id", profile.id).single();
-    setStatus(prof?.status ?? "pending");
-    const { data: reqs } = await supabase
-      .from("enrollment_requests")
-      .select("id")
-      .eq("student_id", profile.id)
-      .limit(1);
-    setHasRequest((reqs ?? []).length > 0);
-    const { data: brs } = await supabase.from("branches").select("id, name");
-    setBranches(brs ?? []);
-    setStatusLoading(false);
-  };
 
   const load = async () => {
     setLoading(true);
@@ -80,19 +59,16 @@ export default function StudentLayout() {
     setUnread(count ?? 0);
   };
 
+  // 가입 승인 절차를 없앴으므로 status 확인 없이 바로 화면을 연다
   useEffect(() => {
-    if (profile) loadStatus();
-  }, [profile]);
-
-  useEffect(() => {
-    if (profile && status === "approved") {
+    if (profile) {
       load();
       loadUnread();
     }
-  }, [profile, status]);
+  }, [profile]);
 
   useEffect(() => {
-    if (!profile || status !== "approved") return;
+    if (!profile) return;
     const channel = supabase
       .channel(`notif-${profile.id}`)
       .on(
@@ -102,7 +78,7 @@ export default function StudentLayout() {
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [profile, status]);
+  }, [profile]);
 
   const handleLogout = async () => {
     await signOut();
@@ -144,65 +120,6 @@ export default function StudentLayout() {
   ];
 
   const current = MENUS.find((m) => m.key === active);
-
-  if (statusLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <p className="text-slate-400">불러오는 중...</p>
-      </div>
-    );
-  }
-
-  const TopBar = () => (
-    <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
-        <div>
-          <p className="text-lg font-bold text-seum-navy">세움스피치</p>
-          <p className="text-xs text-slate-400">{profile?.name}님</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => (window.location.href = "/home")} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50">홈으로</button>
-          <button onClick={handleLogout} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50">로그아웃</button>
-        </div>
-      </div>
-    </header>
-  );
-
-  if (status !== "approved" && !hasRequest) {
-    return (
-      <div className="min-h-screen bg-slate-50">
-        <TopBar />
-        <main className="mx-auto max-w-3xl px-4 py-8">
-          <EnrollmentRequestForm
-            studentId={profile.id}
-            studentName={profile.name}
-            studentEmail={profile.email}
-            branches={branches}
-            onSubmitted={loadStatus}
-          />
-        </main>
-      </div>
-    );
-  }
-
-  if (status !== "approved" && hasRequest) {
-    return (
-      <div className="min-h-screen bg-slate-50">
-        <TopBar />
-        <main className="mx-auto flex max-w-3xl flex-col items-center px-4 py-20 text-center">
-          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-50 text-3xl">⏳</div>
-          <h2 className="text-xl font-bold text-seum-navy">승인 대기 중입니다</h2>
-          <p className="mt-2 max-w-md text-sm text-slate-500">
-            가입 신청이 접수되었습니다. 원장님 승인 후 모든 기능을 이용하실 수 있습니다.
-            승인까지 시간이 걸릴 수 있으니 잠시만 기다려주세요.
-          </p>
-          <button onClick={loadStatus} className="mt-6 rounded-lg bg-seum-blue px-5 py-2 text-sm font-bold text-white hover:bg-[#2a63c4]">
-            승인 상태 새로고침
-          </button>
-        </main>
-      </div>
-    );
-  }
 
   // 메인 콘텐츠
   const renderContent = () => (

@@ -13,16 +13,14 @@ import PaymentsTab from "./PaymentsTab";
 import AdminSettlementTab from "./AdminSettlementTab";
 import ContentTab from "./ContentTab";
 import TeacherProfileTab from "./TeacherProfileTab";
-import StudentMaterialsView from "../../components/StudentMaterialsView";
-import ApprovalTab from "./ApprovalTab";
 import PushNotificationButton from "./PushNotificationButton";
 
+// 학생 자료함은 수강생 관리 목록의 [자료함] 버튼으로 옮겼고,
+// 가입 승인은 신청서 제출과 동시에 자동 승인되므로 메뉴에서 뺀다
 const MENUS = [
   { key: "dashboard", label: "대시보드" },
-  { key: "approval", label: "가입 승인" },
   { key: "courses", label: "반/수업 개설" },
   { key: "students", label: "수강생(수업) 관리" },
-  { key: "materials", label: "학생 자료함" },
   { key: "teachers", label: "선생님 관리" },
   { key: "schedule", label: "전체 스케줄" },
   { key: "consult", label: "상담 관리" },
@@ -40,7 +38,6 @@ export default function AdminLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(null);
-  const [pendingCount, setPendingCount] = useState(0);
   const [inquiryCount, setInquiryCount] = useState(0);
 
   useEffect(() => {
@@ -52,17 +49,8 @@ export default function AdminLayout() {
       setBranches(data ?? []);
       if (data && data.length > 0) setBranchId(data[0].id);
     })();
-    loadPendingCount();
     loadInquiryCount();
   }, []);
-
-  const loadPendingCount = async () => {
-    const { count } = await supabase
-      .from("enrollment_requests")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "pending");
-    setPendingCount(count ?? 0);
-  };
 
   // 진행중인 1:1 문의 개수
   const loadInquiryCount = async () => {
@@ -93,14 +81,10 @@ export default function AdminLayout() {
     switch (active) {
       case "dashboard":
         return <DashboardTab />;
-      case "approval":
-        return <ApprovalTab />;
       case "courses":
         return <CoursesTab branchId={branchId} />;
       case "students":
         return <StudentsTab branchId={branchId} />;
-      case "materials":
-        return <StudentMaterialsView />;
       case "teachers":
         return <TeachersTab branchId={branchId} />;
       case "schedule":
@@ -130,15 +114,16 @@ export default function AdminLayout() {
     }
   };
 
+  // 수강생 관리·전체 스케줄은 화면 안에서 지점을 필터로 고르므로 상단 버튼을 쓰지 않는다
   const needsBranch =
+    active !== "students" &&
+    active !== "schedule" &&
     active !== "settlement" &&
     active !== "dashboard" &&
     active !== "content" &&
     active !== "teacherProfile" &&
-    active !== "approval" &&
     active !== "inquiry" &&
-    active !== "consultManual" &&
-    active !== "materials";
+    active !== "consultManual";
 
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -161,11 +146,6 @@ export default function AdminLayout() {
               }`}
             >
               <span>{m.label}</span>
-              {m.key === "approval" && pendingCount > 0 ? (
-                <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-bold ${active === m.key ? "bg-white text-seum-blue" : "bg-red-500 text-white"}`}>
-                  {pendingCount}
-                </span>
-              ) : null}
               {m.key === "inquiry" && inquiryCount > 0 ? (
                 <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-bold ${active === m.key ? "bg-white text-seum-blue" : "bg-red-500 text-white"}`}>
                   {inquiryCount}
@@ -210,7 +190,7 @@ export default function AdminLayout() {
                     <span className="block h-0.5 w-5 bg-slate-600" />
                   </span>
                 )}
-                {(pendingCount > 0 || inquiryCount > 0) && !menuOpen ? (
+                {inquiryCount > 0 && !menuOpen ? (
                   <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
                 ) : null}
               </button>
@@ -265,11 +245,6 @@ export default function AdminLayout() {
                 }`}
               >
                 <span>{m.label}</span>
-                {m.key === "approval" && pendingCount > 0 ? (
-                  <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white">
-                    {pendingCount}
-                  </span>
-                ) : null}
                 {m.key === "inquiry" && inquiryCount > 0 ? (
                   <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white">
                     {inquiryCount}

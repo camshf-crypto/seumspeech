@@ -18,6 +18,11 @@ export function AuthProvider({ children }) {
     setProfile(data ?? null);
   };
 
+  // 비밀번호 변경처럼 프로필 값이 바뀐 뒤 다시 읽을 때 사용
+  const refreshProfile = async () => {
+    if (user?.id) await loadProfile(user.id);
+  };
+
   useEffect(() => {
     // 처음 로드 시 현재 세션 확인
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -49,7 +54,16 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, profile, role: profile?.role, loading, signOut }}
+      value={{
+        user,
+        profile,
+        role: profile?.role,
+        loading,
+        signOut,
+        refreshProfile,
+        // 첫 로그인이라 비밀번호를 바꿔야 하는 상태
+        mustChangePassword: !!profile?.must_change_password,
+      }}
     >
       {children}
     </AuthContext.Provider>

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { EditLessonPopup } from "./AddLessonPanel";
+import QuickBookModal from "./QuickBookModal";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -41,7 +43,7 @@ function computeRunningRemaining(allBookings) {
   return map;
 }
 
-export default function AdminScheduleTab({ branchId }) {
+export default function AdminScheduleTab() {
   const [slots, setSlots] = useState([]);
   const [courses, setCourses] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -51,6 +53,8 @@ export default function AdminScheduleTab({ branchId }) {
   const [loading, setLoading] = useState(true);
   const [pickTeacher, setPickTeacher] = useState("all");
   const [selectedDate, setSelectedDate] = useState(null);
+  const [editBooking, setEditBooking] = useState(null);
+  const [quickDate, setQuickDate] = useState(null); // 달력 + 로 여는 일정 추가
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
@@ -91,6 +95,8 @@ export default function AdminScheduleTab({ branchId }) {
   useEffect(() => { load(); }, []);
 
   const branchName = (id) => branches.find((b) => b.id === id)?.name?.replace("점", "") ?? "";
+  // QuickBookModal 임시 기본값 (3단계에서 모달 안 선택식으로 교체 예정)
+  const defaultBranchId = branches[0]?.id ?? null;
 
   const { year, month } = cursor;
   const firstDay = new Date(year, month, 1).getDay();
@@ -100,7 +106,7 @@ export default function AdminScheduleTab({ branchId }) {
   const filterTeacher = (tid) => pickTeacher === "all" || tid === pickTeacher;
 
   const slotsOnDate = (ds) =>
-    slots.filter((s) => s.date === ds && filterTeacher(s.teacher_id) && s.branch_id === branchId);
+    slots.filter((s) => s.date === ds && filterTeacher(s.teacher_id));
   // 정규 단체반은 courses의 요일 설정으로 그린다.
   // weekdays(배열, 주 N회)가 있으면 그걸 쓰고 없으면 weekday(단수) 하나만 본다.
   // 개강일 이전과 종강일(개강일 + 주차수) 이후는 그리지 않는다.
@@ -126,9 +132,7 @@ export default function AdminScheduleTab({ branchId }) {
   };
 
   const coursesOnDate = (ds) =>
-    courses.filter(
-      (c) => courseRunsOn(c, ds) && c.branch_id === branchId && filterTeacher(c.teacher_id)
-    );
+    courses.filter((c) => courseRunsOn(c, ds) && filterTeacher(c.teacher_id));
   // 단체반은 아래 "정규 단체반"에서 courses 기준으로 그리므로,
   // lesson_bookings 에 들어온 단체반 예약(학생 없이 course_id만 있는 행)은 여기서 뺀다.
   // 안 그러면 같은 수업이 캘린더에 두 번 뜬다.
@@ -136,11 +140,7 @@ export default function AdminScheduleTab({ branchId }) {
 
   const bookingsOnDate = (ds) =>
     bookings.filter(
-      (b) =>
-        b.date === ds &&
-        !isGroupBooking(b) &&
-        filterTeacher(b.teacher_id) &&
-        b.branch_id === branchId,
+      (b) => b.date === ds && !isGroupBooking(b) && filterTeacher(b.teacher_id),
     );
   const consultsOnDate = (ds) =>
     consults.filter((c) => {
@@ -218,9 +218,20 @@ export default function AdminScheduleTab({ branchId }) {
 
   const detailPanel = (
     <div className="rounded-xl border border-slate-200 bg-white p-5">
-      <h4 className="mb-3 font-bold text-seum-navy">
-        {month + 1}월 {Number(selectedDate?.slice(-2))}일 ({selectedDate ? WEEKDAYS[new Date(selectedDate).getDay()] : ""}) 일정
-      </h4>
+      <div className="mb-3 flex items-center justify-between">
+        <h4 className="font-bold text-seum-navy">
+          {month + 1}월 {Number(selectedDate?.slice(-2))}일 ({selectedDate ? WEEKDAYS[new Date(selectedDate).getDay()] : ""}) 일정
+        </h4>
+        {/* 이 날짜에 일정 추가 */}
+        <button
+          type="button"
+          onClick={() => setQuickDate(selectedDate)}
+          title="일정 추가"
+          className="flex h-7 w-7 items-center justify-center bg-seum-blue text-lg font-bold leading-none text-white hover:bg-[#2a63c4]"
+        >
+          +
+        </button>
+      </div>
 
       {/* 방문상담 */}
       {selConsults.length > 0 && (
@@ -246,7 +257,13 @@ export default function AdminScheduleTab({ branchId }) {
               const rm = remainingMap[b.id];
               const badge = b.attended ? ATTEND_BADGE[b.attended] : null;
               return (
-                <div key={b.id} className="rounded-lg bg-blue-50 px-3 py-2 text-sm">
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setEditBooking(b)}
+                  title="누르면 시간 변경·삭제"
+                  className="block w-full rounded-lg bg-blue-50 px-3 py-2 text-left text-sm hover:bg-blue-100"
+                >
                   <p className="font-medium text-seum-blue">
                     {b.start_time?.slice(0, 5)}{b.end_time ? `~${b.end_time.slice(0, 5)}` : ""} · {b.student?.name ?? b.course?.title ?? "수업"}
                     {badge ? <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[11px] font-bold ${badge.cls}`}>{badge.label}</span> : null}
@@ -258,7 +275,7 @@ export default function AdminScheduleTab({ branchId }) {
                     {b.teacher?.name ? `${b.teacher.name}쌤` : ""}
                     {b.branch?.name ? ` · ${b.branch.name}` : ""}
                   </p>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -283,13 +300,14 @@ export default function AdminScheduleTab({ branchId }) {
       {selConsults.length === 0 && selBookings.length === 0 && selCourses.length === 0 && (
         <p className="py-6 text-center text-sm text-slate-400">이 날 일정이 없습니다.</p>
       )}
+
     </div>
   );
 
   return (
     <div>
       {/* 선생님 필터 */}
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           onClick={() => setPickTeacher("all")}
           className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${pickTeacher === "all" ? "bg-seum-blue text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
@@ -335,6 +353,7 @@ export default function AdminScheduleTab({ branchId }) {
               return (
                 <button
                   key={d}
+                  type="button"
                   onClick={() => setSelectedDate(ds)}
                   className={`flex min-h-[110px] w-full flex-col rounded-lg border p-1.5 text-left align-top transition ${
                     isSelected ? "border-seum-blue bg-blue-50" : "border-slate-200 bg-white hover:bg-slate-50"
@@ -389,6 +408,26 @@ export default function AdminScheduleTab({ branchId }) {
           )}
         </div>
       </div>
+
+      {/* 달력 + 로 여는 일정 추가 */}
+      {quickDate && (
+        <QuickBookModal
+          branchId={defaultBranchId}
+          date={quickDate}
+          defaultTeacherId={pickTeacher === "all" ? null : pickTeacher}
+          onClose={() => setQuickDate(null)}
+          onDone={load}
+        />
+      )}
+
+      {/* 수업 시간 변경·삭제 */}
+      {editBooking && (
+        <EditLessonPopup
+          booking={editBooking}
+          onClose={() => setEditBooking(null)}
+          onDone={load}
+        />
+      )}
 
       {/* 모바일 상세 - 팝업 */}
       {selectedDate && (

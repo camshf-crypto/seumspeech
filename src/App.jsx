@@ -34,6 +34,8 @@ import KidsSpeech from "./pages/KidsSpeech";
 import KidsLogic from "./pages/KidsLogic";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+// ⚠️ 아래 경로는 EnrollmentRequestForm.jsx 가 실제로 있는 위치에 맞게 고칠 것
+import EnrollmentRequestForm from "./pages/student/EnrollmentRequestForm";
 import AdminLayout from "./pages/admin/AdminLayout";
 import TeacherLayout from "./pages/teacher/TeacherLayout";
 import StudentLayout from "./pages/student/StudentLayout";
@@ -49,6 +51,17 @@ export default function App() {
           <Route path="/" element={<Intro />} />
         </Routes>
         <Footer />
+      </div>
+    );
+  }
+
+  // 회원 등록 — 로그인 없이 누구나. 아이패드 현장 등록 / 문자로 보낸 링크
+  if (pathname === "/join") {
+    return (
+      <div className="min-h-screen bg-slate-50 px-4 py-10">
+        <Routes>
+          <Route path="/join" element={<EnrollmentRequestForm />} />
+        </Routes>
       </div>
     );
   }

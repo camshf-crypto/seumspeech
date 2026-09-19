@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+    <title>세움 스케줄</title>
+
+    <!-- 스케줄 전용 매니페스트 (세움스피치 앱과 별개) -->
+    <link rel="manifest" href="/schedule.webmanifest" />
+
+    <!-- 아이폰용 — iOS 는 매니페스트 아이콘을 안 보고 이것만 본다 -->
+    <link rel="apple-touch-icon" href="/schedule-apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="세움 스케줄" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#16a34a" />
+
+    <style>
+      :root {
+        box-sizing: border-box;
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      * { box-sizing: inherit; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 24px;
+        padding: 24px;
+        background: #16a34a;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+          "Malgun Gothic", "Segoe UI", sans-serif;
+        text-align: center;
+      }
+      img { width: 96px; height: 96px; border-radius: 22px; }
+      h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }
+      p { margin: 0; font-size: 14px; line-height: 1.7; color: #bbf7d0; max-width: 300px; }
+      a.go {
+        margin-top: 4px;
+        padding: 14px 28px;
+        background: #fff;
+        color: #15803d;
+        font-size: 15px;
+        font-weight: 700;
+        text-decoration: none;
+        border-radius: 10px;
+      }
+      .hint { font-size: 12px; color: #a7f3d0; }
+    </style>
+  </head>
+
+  <body>
+    <img src="/schedule-512x512.png" alt="세움 스케줄" />
+    <h1>세움 스케줄</h1>
+
+    <p id="msg">
+      아래 버튼을 눌러 스케줄을 엽니다.<br />
+      홈 화면에 추가하면 다음부터 바로 열 수 있습니다.
+    </p>
+
+    <a class="go" id="go" href="/">스케줄 열기</a>
+
+    <p class="hint" id="hint">
+      아이폰: 공유 버튼 → 홈 화면에 추가<br />
+      안드로이드: 메뉴(⋮) → 앱 설치
+    </p>
+
+    <script>
+      // ▼▼▼ 여기만 실제 스케줄 화면 주소로 바꾸세요 ▼▼▼
+      var SCHEDULE_URL = "/admin";
+      // ▲▲▲ 원장 화면 주소 ▲▲▲
+
+      document.getElementById("go").href = SCHEDULE_URL;
+
+      // 홈 화면 아이콘으로 연 경우엔 안내 없이 바로 이동한다
+      var standalone =
+        window.navigator.standalone === true ||
+        window.matchMedia("(display-mode: standalone)").matches;
+
+      if (standalone) {
+        document.getElementById("msg").textContent = "여는 중...";
+        document.getElementById("hint").style.display = "none";
+        location.replace(SCHEDULE_URL);
+      }
+    </script>
+  </body>
+</html>

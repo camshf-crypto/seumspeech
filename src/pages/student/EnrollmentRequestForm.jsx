@@ -1,17 +1,44 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
 const GENDERS = ["남자", "여자"];
-const ONE_DETAILS = ["취업면접", "입시면접", "CEO", "보이스", "프레젠테이션", "스피치"];
-const GROUP_DETAILS = ["스피치", "보이스", "면접반"];
 const VISIT_PATHS = ["블로그", "홈페이지", "지인소개", "간판", "유튜브", "영수증리뷰", "네이버지도"];
 
-export default function EnrollmentRequestForm({ studentId, studentName, studentEmail, branches = [], onSubmitted }) {
-  const [name, setName] = useState(studentName ?? "");
+// 1:1 항목은 실제 수업(courses) 이름과 똑같이 맞춰야 원장 화면에서 자동 연결된다
+// hint 는 학생이 잘못 고르지 않도록 붙이는 짧은 설명
+const ONE_DETAILS = [
+  { name: "대입면접", hint: "대학 수시·정시" },
+  { name: "고입면접", hint: "특목고·자사고" },
+  { name: "편입면접", hint: "대학 편입" },
+  { name: "공무원면접", hint: "국가직·지방직" },
+  { name: "공기업면접", hint: "공기업·공공기관" },
+  { name: "사기업면접", hint: "일반 기업 취업" },
+  { name: "병원면접", hint: "간호사·의료직" },
+  { name: "스피치", hint: "발표·말하기" },
+  { name: "보이스", hint: "발성·발음" },
+  { name: "프레젠테이션", hint: "PT·자료 발표" },
+];
+const GROUP_DETAILS = [
+  { name: "스피치", hint: "발표·말하기" },
+  { name: "보이스", hint: "발성·발음" },
+  { name: "면접반", hint: "면접 대비" },
+];
+
+// 생년월일: 숫자만 받아 1987-06-20 형태로 자동 변환
+function formatBirth(v) {
+  const d = v.replace(/\D/g, "").slice(0, 8);
+  if (d.length <= 4) return d;
+  if (d.length <= 6) return d.slice(0, 4) + "-" + d.slice(4);
+  return d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6);
+}
+
+export default function EnrollmentRequestForm({ onSubmitted }) {
+  const [branches, setBranches] = useState([]);
+  const [name, setName] = useState("");
   const [gender, setGender] = useState("");
   const [phone, setPhone] = useState("");
   const [birth, setBirth] = useState("");
-  const [email, setEmail] = useState(studentEmail ?? "");
+  const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   const [branchId, setBranchId] = useState("");
   const [lessonType, setLessonType] = useState("oneonone");
@@ -21,57 +48,128 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
   const [termsAgree, setTermsAgree] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(null); // 완료 후 로그인 정보 안내
 
   const details = lessonType === "oneonone" ? ONE_DETAILS : GROUP_DETAILS;
+
+  // 로그인 없이 쓰는 화면이므로 지점 목록을 직접 불러온다
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase
+        .from("branches")
+        .select("id, name")
+        .order("name");
+      if (error) {
+        console.error("지점 조회 실패:", error);
+        return;
+      }
+      setBranches(data ?? []);
+    })();
+  }, []);
 
   const submit = async () => {
     if (!name.trim()) return alert("성명을 입력하세요.");
     if (!phone.trim()) return alert("전화번호를 입력하세요.");
-    // 지점이 비면 나중에 학생 정보를 일일이 고쳐야 하므로 필수로 받는다.
+    // 이메일이 곧 로그인 아이디이므로 필수로 받는다
+    if (!email.trim()) return alert("이메일을 입력하세요. 로그인 아이디로 사용됩니다.");
+    if (!gender) return alert("성별을 선택하세요.");
+    if (birth.length !== 10) return alert("생년월일을 8자리로 입력하세요. (예: 19870620)");
+    if (!address.trim()) return alert("주소를 입력하세요.");
     if (!branchId) return alert("희망 지점을 선택하세요.");
+    if (!lessonDetail) return alert("수강 과목을 선택하세요.");
     if (!agree) return alert("개인정보 수집·이용에 동의해야 신청할 수 있습니다.");
     if (!termsAgree) return alert("이용약관 및 환불규정에 동의해야 신청할 수 있습니다.");
 
     setSaving(true);
-    const { error } = await supabase.from("enrollment_requests").insert({
-      student_id: studentId,
-      name: name.trim(),
-      gender: gender || null,
-      phone: phone.trim(),
-      birth: birth || null,
-      email: email.trim() || null,
-      address: address.trim() || null,
-      branch_id: branchId,
-      lesson_type: lessonType,
-      lesson_detail: lessonDetail || null,
-      visit_path: visitPath || null,
-      privacy_agree: agree,
-      terms_agree: termsAgree,
-      status: "pending",
+
+    // 계정 생성은 service_role 키가 필요해 Edge Function에서 처리한다
+    const { data, error } = await supabase.functions.invoke("create-student", {
+      body: {
+        name: name.trim(),
+        gender,
+        phone: phone.trim(),
+        birth: birth || null,
+        email: email.trim(),
+        address: address.trim() || null,
+        branch_id: branchId,
+        lesson_type: lessonType,
+        lesson_detail: lessonDetail,
+        visit_path: visitPath || null,
+        privacy_agree: true,
+        terms_agree: true,
+      },
     });
 
+    setSaving(false);
+
     if (error) {
-      setSaving(false);
-      return alert("신청 실패: " + error.message);
+      // invoke 는 400/409 응답이면 본문을 넘겨주지 않으므로 직접 읽는다
+      let msg = error.message;
+      try {
+        const body = await error.context.json();
+        if (body?.error) msg = body.error;
+      } catch (_) {
+        // 본문을 읽지 못하면 원래 메시지를 그대로 쓴다
+      }
+      return alert(msg);
     }
 
-    await supabase.from("profiles")
-      .update({ name: name.trim(), phone: phone.trim(), status: "pending", branch_id: branchId })
-      .eq("id", studentId);
+    if (data?.error) return alert(data.error);
 
-    setSaving(false);
-    alert("가입 신청이 접수되었습니다. 원장 승인 후 이용할 수 있습니다.");
+    setDone({ email: data.email, password: data.initial_password });
     if (onSubmitted) onSubmitted();
   };
+
+  // 완료 화면 — 학생이 이 자리에서 로그인 정보를 확인하고 가야 한다
+  if (done) {
+    return (
+      <div className="mx-auto max-w-2xl">
+        <div className="border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <h1 className="mb-2 text-2xl font-bold text-seum-navy">등록이 완료되었습니다</h1>
+          <p className="mb-6 text-sm text-slate-500">
+            아래 정보로 바로 로그인하실 수 있습니다. 꼭 기억해 주세요.
+          </p>
+
+          <div className="mb-6 space-y-3 bg-slate-50 p-6 text-left">
+            <div>
+              <p className="text-xs text-slate-400">아이디 (이메일)</p>
+              <p className="text-lg font-bold text-seum-navy">{done.email}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">초기 비밀번호</p>
+              <p className="text-lg font-bold text-seum-navy">{done.password}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                seum + 전화번호 뒤 4자리입니다.
+              </p>
+            </div>
+          </div>
+
+          <p className="mb-6 bg-amber-50 p-3 text-sm text-amber-700">
+            처음 로그인하시면 비밀번호를 바꾸는 화면이 나옵니다.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => (window.location.href = "/login")}
+            className="w-full bg-seum-blue py-3.5 font-bold text-white hover:bg-[#2a63c4]"
+          >
+            로그인하러 가기
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl">
       <div className="mb-6 text-center">
-        <h1 className="text-2xl font-bold text-seum-navy">세움스피치 회원 가입 신청서</h1>
-        <p className="mt-1 text-sm text-slate-400">아래 항목을 작성하시면 원장 승인 후 이용하실 수 있습니다.</p>
+        <h1 className="text-2xl font-bold text-seum-navy">세움스피치 회원 등록</h1>
+        <p className="mt-1 text-sm text-slate-400">
+          아래 항목을 작성하시면 바로 이용하실 수 있습니다.
+        </p>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="border border-slate-200 bg-white p-6 shadow-sm">
         {/* 성명 + 성별 */}
         <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
@@ -82,18 +180,20 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="성명"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
+              className="w-full border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-600">성별</label>
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              성별 <span className="text-red-500">*</span>
+            </label>
             <div className="flex gap-2">
               {GENDERS.map((g) => (
                 <button
                   key={g}
                   type="button"
                   onClick={() => setGender(g)}
-                  className={`flex-1 rounded-lg border py-2.5 text-sm font-medium transition ${
+                  className={`flex-1 border py-2.5 text-sm font-medium transition ${
                     gender === g
                       ? "border-seum-blue bg-seum-blue text-white"
                       : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
@@ -116,38 +216,53 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="010-0000-0000"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
+              className="w-full border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
             />
+            <p className="mt-1 text-xs text-slate-400">
+              뒤 4자리가 초기 비밀번호에 사용됩니다.
+            </p>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-600">생년월일</label>
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              생년월일 <span className="text-red-500">*</span>
+            </label>
             <input
-              type="date"
+              type="text"
+              inputMode="numeric"
               value={birth}
-              onChange={(e) => setBirth(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-600 outline-none focus:border-seum-blue"
+              onChange={(e) => setBirth(formatBirth(e.target.value))}
+              placeholder="19870620"
+              maxLength={10}
+              className="w-full border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
             />
+            <p className="mt-1 text-xs text-slate-400">숫자 8자리만 입력하면 됩니다.</p>
           </div>
         </div>
 
         {/* 이메일 + 주소 */}
         <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-600">이메일</label>
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              이메일 <span className="text-red-500">*</span>
+            </label>
             <input
+              type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="example@email.com"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
+              className="w-full border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
             />
+            <p className="mt-1 text-xs text-slate-400">로그인 아이디로 사용됩니다.</p>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-600">주소 (동까지)</label>
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              주소 (동까지) <span className="text-red-500">*</span>
+            </label>
             <input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               placeholder="예: 강서구 마곡동"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
+              className="w-full border border-slate-300 px-3 py-2.5 outline-none focus:border-seum-blue"
             />
           </div>
         </div>
@@ -160,7 +275,7 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
           <select
             value={branchId}
             onChange={(e) => setBranchId(e.target.value)}
-            className={`w-full rounded-lg border px-3 py-2.5 outline-none focus:border-seum-blue ${
+            className={`w-full border px-3 py-2.5 outline-none focus:border-seum-blue ${
               branchId ? "border-slate-300 text-slate-700" : "border-red-300 text-slate-400"
             }`}
           >
@@ -174,14 +289,16 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
           )}
         </div>
 
-        {/* 수강 형태 */}
+        {/* 수강 과목 */}
         <div className="mb-4">
-          <label className="mb-2 block text-sm font-medium text-slate-600">수강 형태</label>
+          <label className="mb-2 block text-sm font-medium text-slate-600">
+            수강 과목 <span className="text-red-500">*</span>
+          </label>
           <div className="mb-3 grid grid-cols-2 gap-2">
             <button
               type="button"
               onClick={() => { setLessonType("oneonone"); setLessonDetail(""); }}
-              className={`rounded-lg border py-3 text-sm font-bold transition ${
+              className={`border py-3 text-sm font-bold transition ${
                 lessonType === "oneonone"
                   ? "border-seum-blue bg-blue-50 text-seum-blue"
                   : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
@@ -192,7 +309,7 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
             <button
               type="button"
               onClick={() => { setLessonType("group"); setLessonDetail(""); }}
-              className={`rounded-lg border py-3 text-sm font-bold transition ${
+              className={`border py-3 text-sm font-bold transition ${
                 lessonType === "group"
                   ? "border-seum-blue bg-blue-50 text-seum-blue"
                   : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
@@ -204,16 +321,19 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
           <div className="flex flex-wrap gap-2">
             {details.map((d) => (
               <button
-                key={d}
+                key={d.name}
                 type="button"
-                onClick={() => setLessonDetail(d)}
-                className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
-                  lessonDetail === d
+                onClick={() => setLessonDetail(d.name)}
+                className={`border px-3 py-2 text-left transition ${
+                  lessonDetail === d.name
                     ? "border-seum-blue bg-seum-blue text-white"
                     : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
                 }`}
               >
-                {d}
+                <span className="block text-sm font-medium">{d.name}</span>
+                <span className={`block text-[11px] ${lessonDetail === d.name ? "text-white/70" : "text-slate-400"}`}>
+                  {d.hint}
+                </span>
               </button>
             ))}
           </div>
@@ -228,7 +348,7 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
                 key={v}
                 type="button"
                 onClick={() => setVisitPath(v)}
-                className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+                className={`border px-3 py-1.5 text-sm font-medium transition ${
                   visitPath === v
                     ? "border-seum-blue bg-seum-blue text-white"
                     : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
@@ -241,10 +361,10 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
         </div>
 
         {/* 개인정보 수집·이용 동의 */}
-        <div className="mb-3 rounded-xl bg-slate-50 p-4">
+        <div className="mb-3 bg-slate-50 p-4">
           <p className="mb-1.5 text-sm font-bold text-slate-700">개인정보 수집 및 이용 동의</p>
           <p className="mb-3 text-xs leading-relaxed text-slate-500">
-            세움스피치는 수강 목적의 회원 가입 신청 접수와 관련하여 필요한 개인정보(성명, 전화번호, 주소, 이메일 등)를 수집합니다. 민감한 개인정보는 수집하거나 목적 외로 사용하지 않습니다.
+            세움스피치는 수강 목적의 회원 등록과 관련하여 필요한 개인정보(성명, 전화번호, 주소, 이메일 등)를 수집합니다. 민감한 개인정보는 수집하거나 목적 외로 사용하지 않습니다.
           </p>
           <label className="flex cursor-pointer items-center gap-2">
             <input
@@ -260,7 +380,7 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
         </div>
 
         {/* 이용약관·환불규정 동의 */}
-        <div className="mb-6 rounded-xl bg-slate-50 p-4">
+        <div className="mb-6 bg-slate-50 p-4">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-sm font-bold text-slate-700">세움스피치 이용약관·환불규정</p>
             <button
@@ -295,10 +415,10 @@ export default function EnrollmentRequestForm({ studentId, studentName, studentE
         <button
           type="button"
           onClick={submit}
-          disabled={saving || !branchId || !agree || !termsAgree}
-          className="w-full rounded-lg bg-seum-blue py-3.5 font-bold text-white hover:bg-[#2a63c4] disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={saving || !gender || birth.length !== 10 || !address.trim() || !branchId || !lessonDetail || !agree || !termsAgree}
+          className="w-full bg-seum-blue py-3.5 font-bold text-white hover:bg-[#2a63c4] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {saving ? "신청 중..." : "가입 신청하기"}
+          {saving ? "등록 중..." : "등록하기"}
         </button>
       </div>
     </div>

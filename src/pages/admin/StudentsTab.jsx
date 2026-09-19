@@ -2,74 +2,70 @@ import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { CATEGORY_LIST, getCategory } from "../../lib/interviewConfig";
 import StudentPaymentSection from "./StudentPaymentSection";
+import StudentMaterialsView from "../../components/StudentMaterialsView";
 
-const INTERVIEW_TITLES = ["1:1 공무원면접", "1:1 공기업면접", "1:1 사기업면접"];
-const GONGMUWON = "1:1 공무원면접";
-const EXAM_TYPES = ["국가직", "지방직", "서울시", "소방", "경찰", "교육행정", "군무원", "기타"];
-const CAREER_LEVELS = ["신입", "경력"];
+// created_at 은 UTC 로 저장되므로, 화면·필터 모두 브라우저(한국) 시간 기준으로 맞춘다
+const ymd = (ts) => {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+const fmtJoin = (ts) => {
+  const v = ymd(ts);
+  return v ? v.replace(/-/g, ".") : "-";
+};
 
 const STATUS_TABS = [
-  { key: "all", label: "전체" },
+  { key: "all", label: "수강 상태 전체" },
   { key: "active", label: "수강중" },
   { key: "waiting", label: "등록대기" },
   { key: "done", label: "완료" },
 ];
 
-const bkDateFmt = (ds) => {
-  if (!ds) return "-";
-  const d = new Date(ds);
-  return `${d.getMonth() + 1}.${d.getDate()}`;
-};
-
-export default function StudentsTab({ branchId }) {
+export default function StudentsTab() {
   const [students, setStudents] = useState([]);
   const [enrollMap, setEnrollMap] = useState({});
-  const [groupCourses, setGroupCourses] = useState([]);
-  const [oneCourses, setOneCourses] = useState([]);
-  const [teachers, setTeachers] = useState([]);
+  const [paymentsMap, setPaymentsMap] = useState({}); // student_id -> [payments]
   const [loading, setLoading] = useState(true);
 
+  const [branches, setBranches] = useState([]);
+  const [branchFilter, setBranchFilter] = useState("all");
+  const [payFilter, setPayFilter] = useState("all");
+  const [joinDate, setJoinDate] = useState("");
   const [statusTab, setStatusTab] = useState("all");
   const [search, setSearch] = useState("");
 
-  const [selected, setSelected] = useState(null);
+  // 모달 3종 — 정보 / 수강 / 결제
+  const [memoTarget, setMemoTarget] = useState(null);   // 상담 메모
+  const [addTarget, setAddTarget] = useState(null);     // 추가 등록
+  const [payTarget, setPayTarget] = useState(null);
+  const [fileTarget, setFileTarget] = useState(null);
+
   const [saving, setSaving] = useState(false);
   const [memoText, setMemoText] = useState("");
-
-  const [enrollTab, setEnrollTab] = useState("group");
-  const [pickCourse, setPickCourse] = useState("");
-  const [sessions, setSessions] = useState(20);
-  const [oneType, setOneType] = useState("");
-  const [oneTeacher, setOneTeacher] = useState("");
-  const [oneSessions, setOneSessions] = useState(10);
-  const [examType, setExamType] = useState("");
-  const [company, setCompany] = useState("");
-  const [jobRole, setJobRole] = useState("");
-  const [careerLevel, setCareerLevel] = useState("");
-  const [assigning, setAssigning] = useState(false);
-
-  // 1:1 등록 시 첫 수업
-  const [firstDate, setFirstDate] = useState("");
-  const [firstTime, setFirstTime] = useState("14:00");
-  const [firstEndTime, setFirstEndTime] = useState("15:00");
-
   const [jobCompany, setJobCompany] = useState("");
   const [jobPosition, setJobPosition] = useState("");
   const [jobStatus, setJobStatus] = useState("");
+  const [editBranch, setEditBranch] = useState("");
+  const [editEnrolls, setEditEnrolls] = useState([]); // 수정 모달에서 고치는 수강 횟수
 
-  const [enrollEdits, setEnrollEdits] = useState({});
-  const [showAddEnroll, setShowAddEnroll] = useState(false);
+  // 추가 등록
+  const [addEnrolls, setAddEnrolls] = useState([]);
+  const [addEnrollId, setAddEnrollId] = useState("");
+  const [addCount, setAddCount] = useState(6);
+  const [addMethod, setAddMethod] = useState("현금");
+  const [addPay, setAddPay] = useState(true);
+
+
 
   // 수강별 예약(첫 수업) 목록 + 추가 폼 상태
-  const [bookingsMap, setBookingsMap] = useState({}); // enrollment_id -> [bookings]
-  const [bookForm, setBookForm] = useState({}); // enrollment_id -> {date, time}
 
-  // ===== 면접 카테고리 배정 모달 상태 (기존 질문생성 모달 대체) =====
-  const [assignTarget, setAssignTarget] = useState(null); // { student }
+  // ===== 면접 카테고리 배정 모달 =====
+  const [assignTarget, setAssignTarget] = useState(null);
   const [assignCategory, setAssignCategory] = useState("");
   const [assignSub, setAssignSub] = useState("");
   const [assignSaving, setAssignSaving] = useState(false);
-  // 학생별 현재 배정 요약 { [studentId]: { category_key, sub_key } }
   const [interviewAssignMap, setInterviewAssignMap] = useState({});
 
   const loadBase = async () => {
@@ -77,14 +73,17 @@ export default function StudentsTab({ branchId }) {
     const { data: st } = await supabase
       .from("profiles").select("*").eq("role", "student")
       .order("created_at", { ascending: false });
-    const { data: cs } = await supabase.from("courses").select("*").eq("active", true);
-    const { data: tc } = await supabase.from("profiles").select("id, name").eq("role", "teacher");
     const { data: enr } = await supabase
       .from("enrollments")
-      .select("*, courses(title, type, branch_id), teacher:teacher_id(name)");
+      .select("*, courses(title, type, branch_id, price), teacher:teacher_id(name)");
+    const { data: br } = await supabase.from("branches").select("id, name").order("sort_order");
     const { data: ia } = await supabase
       .from("interview_assignments")
       .select("student_id, category_key, sub_key");
+    const { data: pay } = await supabase
+      .from("payments")
+      .select("student_id, enrollment_id, amount, refund_amount, status")
+      .eq("status", "paid");
 
     const map = {};
     (enr ?? []).forEach((e) => {
@@ -93,32 +92,20 @@ export default function StudentsTab({ branchId }) {
     const iaMap = {};
     (ia ?? []).forEach((a) => { iaMap[a.student_id] = { category_key: a.category_key, sub_key: a.sub_key }; });
 
+    const payMap = {};
+    (pay ?? []).forEach((p) => {
+      (payMap[p.student_id] = payMap[p.student_id] || []).push(p);
+    });
+
+    setBranches(br ?? []);
     setStudents(st ?? []);
     setEnrollMap(map);
+    setPaymentsMap(payMap);
     setInterviewAssignMap(iaMap);
-    setGroupCourses((cs ?? []).filter((c) => c.type === "group"));
-    setOneCourses((cs ?? []).filter((c) => c.type === "oneonone"));
-    setTeachers(tc ?? []);
     setLoading(false);
   };
 
   useEffect(() => { loadBase(); }, []);
-
-  // 선택 학생의 수업 예약 불러오기
-  const loadBookings = async (sid) => {
-    const { data: bk } = await supabase
-      .from("lesson_bookings")
-      .select("*")
-      .eq("student_id", sid)
-      .order("date")
-      .order("start_time");
-    const map = {};
-    (bk ?? []).forEach((b) => {
-      const key = b.enrollment_id ?? "none";
-      (map[key] = map[key] || []).push(b);
-    });
-    setBookingsMap(map);
-  };
 
   const studentStatus = (sid) => {
     const list = enrollMap[sid] ?? [];
@@ -126,16 +113,53 @@ export default function StudentsTab({ branchId }) {
     return list.some((e) => e.status === "active" && e.remaining_sessions > 0) ? "active" : "done";
   };
 
-  const inBranch = (sid) => {
+  const branchName = (id) => branches.find((b) => b.id === id)?.name ?? "-";
+
+  const inBranch = (s) => {
+    if (branchFilter === "all") return true;
+    if (s.branch_id === branchFilter) return true;
+    const list = enrollMap[s.id] ?? [];
+    return list.some((e) => e.courses?.branch_id === branchFilter);
+  };
+
+  // 납부 상태 — 수업 가격 기준으로 몇 회분 냈는지 계산
+  const payStatus = (sid) => {
     const list = enrollMap[sid] ?? [];
-    const st = students.find((s) => s.id === sid);
-    if (st?.branch_id === branchId) return true;
-    return list.some((e) => e.courses?.branch_id === branchId);
+    if (list.length === 0) return null;
+    const pays = paymentsMap[sid] ?? [];
+
+    let total = 0;
+    let paid = 0;
+    let priceMissing = false;
+
+    list.forEach((e) => {
+      const isOne = e.courses?.type === "oneonone";
+      const price = e.courses?.price ?? 0;
+      const unit = isOne ? price : price;
+      const count = isOne ? e.total_sessions ?? 0 : 1;
+      total += count;
+      if (!price) { priceMissing = true; return; }
+      const sum = pays
+        .filter((p) => p.enrollment_id === e.id)
+        .reduce((acc, p) => acc + (p.amount ?? 0) - (p.refund_amount ?? 0), 0);
+      paid += Math.round(sum / unit);
+    });
+
+    if (priceMissing) return null;
+    const left = total - paid;
+    return left <= 0 ? { label: "완납", done: true } : { label: `${left}회 미납`, done: false };
   };
 
   const filtered = students.filter((s) => {
-    if (!inBranch(s.id)) return false;
+    if (!inBranch(s)) return false;
     if (statusTab !== "all" && studentStatus(s.id) !== statusTab) return false;
+    if (payFilter !== "all") {
+      const p = payStatus(s.id);
+      if (!p) return false;
+      if (payFilter === "done" && !p.done) return false;
+      if (payFilter === "unpaid" && p.done) return false;
+    }
+    if (joinDate && ymd(s.created_at) !== joinDate) return false;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       if (!((s.name || "").toLowerCase().includes(q) || (s.phone || "").includes(q) || (s.email || "").toLowerCase().includes(q))) return false;
@@ -154,38 +178,86 @@ export default function StudentsTab({ branchId }) {
     return list.map((e) => `${e.remaining_sessions}/${e.total_sessions}`).join(", ");
   };
 
-  const interviewEnroll = (sid) => {
-    const list = enrollMap[sid] ?? [];
-    return list.find((e) => INTERVIEW_TITLES.includes(e.courses?.title));
-  };
-
-  const openStudent = (student) => {
-    setSelected(student);
-    setEnrollTab("group");
-    setPickCourse(""); setOneType(""); setOneTeacher("");
-    setExamType(""); setCompany(""); setJobRole(""); setCareerLevel("");
-    setFirstDate(""); setFirstTime("14:00");
+  // ===== 정보 모달 =====
+  const openMemo = (student) => {
+    setMemoTarget(student);
     setJobCompany(student.job_company ?? "");
     setJobPosition(student.job_position ?? "");
     setJobStatus(student.job_status ?? "");
-    const list = enrollMap[student.id] ?? [];
-    const edits = {};
-    list.forEach((e) => {
-      edits[e.id] = {
+    setEditBranch(student.branch_id ?? "");
+    // 수강 횟수 — 화면에서 고칠 수 있게 복사해둔다 (orig 는 바뀐 것만 저장하려고 남겨둠)
+    setEditEnrolls(
+      (enrollMap[student.id] ?? []).map((e) => ({
+        id: e.id,
+        title: e.courses?.title?.replace("1:1 ", "") ?? "수강",
+        status: e.status,
         total: e.total_sessions ?? 0,
-        remain: e.remaining_sessions ?? 0,
-        teacher: e.teacher_id ?? "",
-        examType: e.exam_type ?? "",
-        company: e.company ?? "",
-        jobRole: e.job_role ?? "",
-        career: e.career_level ?? "",
-      };
-    });
-    setEnrollEdits(edits);
-    setBookForm({});
-    setShowAddEnroll(false);
+        remaining: e.remaining_sessions ?? 0,
+        origTotal: e.total_sessions ?? 0,
+        origRemaining: e.remaining_sessions ?? 0,
+      }))
+    );
     loadMemo(student.id);
-    loadBookings(student.id);
+  };
+
+  const setEnrollField = (id, field, value) => {
+    setEditEnrolls((list) =>
+      list.map((e) => (e.id === id ? { ...e, [field]: Math.max(0, Number(value) || 0) } : e))
+    );
+  };
+
+  // 재등록 — 기존 수강에 회차를 더한다
+  const openAdd = async (student) => {
+    setAddTarget(student);
+    setAddCount(6);
+    setAddMethod("현금");
+    setAddPay(true);
+    const { data } = await supabase
+      .from("enrollments")
+      .select("id, total_sessions, remaining_sessions, courses(title, type, price)")
+      .eq("student_id", student.id)
+      .eq("status", "active");
+    const list = data ?? [];
+    setAddEnrolls(list);
+    setAddEnrollId(list.length === 1 ? list[0].id : "");
+  };
+
+  const saveAdd = async () => {
+    if (!addEnrollId) return alert("어느 수강에 추가할지 선택하세요.");
+    const e = addEnrolls.find((x) => x.id === addEnrollId);
+    const n = Number(addCount);
+    if (!n || n < 1) return alert("추가 횟수를 입력하세요.");
+
+    setSaving(true);
+    const { error } = await supabase
+      .from("enrollments")
+      .update({
+        total_sessions: (e.total_sessions ?? 0) + n,
+        remaining_sessions: (e.remaining_sessions ?? 0) + n,
+      })
+      .eq("id", e.id);
+    if (error) { setSaving(false); return alert("추가 실패: " + error.message); }
+
+    // 결제도 함께 기록 (1:1은 회당 단가 × 추가 횟수)
+    if (addPay) {
+      const unit = e.courses?.price ?? 0;
+      const amount = e.courses?.type === "oneonone" ? unit * n : unit;
+      if (amount > 0) {
+        await supabase.from("payments").insert({
+          student_id: addTarget.id,
+          enrollment_id: e.id,
+          amount,
+          method: addMethod,
+          status: "paid",
+          paid_at: new Date().toISOString(),
+        });
+      }
+    }
+
+    setSaving(false);
+    alert("재등록되었습니다.");
+    setAddTarget(null);
+    loadBase();
   };
 
   const loadMemo = async (sid) => {
@@ -195,205 +267,53 @@ export default function StudentsTab({ branchId }) {
     setMemoText(merged);
   };
 
-  const closeModal = () => { setSelected(null); loadBase(); };
+  const saveMemo = async () => {
+    // 잔여가 총 횟수보다 많으면 막는다
+    const bad = editEnrolls.find((e) => e.remaining > e.total);
+    if (bad) return alert(`${bad.title} — 잔여 횟수가 총 횟수보다 많습니다.`);
 
-  const setEdit = (enrollId, key, val) =>
-    setEnrollEdits((p) => ({ ...p, [enrollId]: { ...p[enrollId], [key]: val } }));
-
-  const saveAll = async () => {
     setSaving(true);
     try {
       await supabase.from("profiles")
-        .update({ job_company: jobCompany, job_position: jobPosition, job_status: jobStatus })
-        .eq("id", selected.id);
+        .update({
+          job_company: jobCompany,
+          job_position: jobPosition,
+          job_status: jobStatus,
+          branch_id: editBranch || null,
+        })
+        .eq("id", memoTarget.id);
+
+      // 수강 횟수 — 바뀐 것만 반영
+      const changed = editEnrolls.filter(
+        (e) => e.total !== e.origTotal || e.remaining !== e.origRemaining
+      );
+      for (const e of changed) {
+        const { error } = await supabase
+          .from("enrollments")
+          .update({ total_sessions: e.total, remaining_sessions: e.remaining })
+          .eq("id", e.id);
+        if (error) throw error;
+      }
 
       const { data: me } = await supabase.auth.getUser();
-      await supabase.from("student_notes").delete().eq("student_id", selected.id);
+      await supabase.from("student_notes").delete().eq("student_id", memoTarget.id);
       const body = memoText.trim();
       if (body) {
         await supabase.from("student_notes").insert({
-          student_id: selected.id, author_id: me?.user?.id, content: body,
+          student_id: memoTarget.id, author_id: me?.user?.id, content: body,
         });
       }
-
-      const list = enrollMap[selected.id] ?? [];
-      for (const e of list) {
-        const ed = enrollEdits[e.id];
-        if (!ed) continue;
-        const title = e.courses?.title ?? "";
-        const isItv = INTERVIEW_TITLES.includes(title);
-        const isGm = title === GONGMUWON;
-        const payload = {
-          total_sessions: Number(ed.total),
-          remaining_sessions: Number(ed.remain),
-          teacher_id: ed.teacher || null,
-        };
-        if (e.courses?.type === "oneonone") {
-          payload.exam_type = isGm ? (ed.examType || null) : null;
-          payload.company = isItv && !isGm ? (ed.company || null) : null;
-          payload.job_role = isItv ? (ed.jobRole || null) : null;
-          payload.career_level = isItv ? (ed.career || null) : null;
-        }
-        await supabase.from("enrollments").update(payload).eq("id", e.id);
-      }
-
       setSaving(false);
       alert("저장되었습니다.");
-      closeModal();
+      setMemoTarget(null);
+      loadBase();
     } catch (err) {
       setSaving(false);
       alert("저장 실패: " + err.message);
     }
   };
 
-  const selectedEnroll = selected ? enrollMap[selected.id] ?? [] : [];
-
-  const refreshKeepOpen = async () => {
-    await loadBase();
-    const { data: fresh } = await supabase.from("profiles").select("*").eq("id", selected.id).single();
-    const { data: enr } = await supabase
-      .from("enrollments")
-      .select("*, courses(title, type, branch_id), teacher:teacher_id(name)")
-      .eq("student_id", selected.id);
-    setEnrollMap((p) => ({ ...p, [selected.id]: enr ?? [] }));
-    const edits = {};
-    (enr ?? []).forEach((e) => {
-      edits[e.id] = {
-        total: e.total_sessions ?? 0,
-        remain: e.remaining_sessions ?? 0,
-        teacher: e.teacher_id ?? "",
-        examType: e.exam_type ?? "",
-        company: e.company ?? "",
-        jobRole: e.job_role ?? "",
-        career: e.career_level ?? "",
-      };
-    });
-    setEnrollEdits(edits);
-    if (fresh) setSelected(fresh);
-    await loadBookings(selected.id);
-  };
-
-  const assignGroup = async () => {
-    if (!pickCourse) return alert("반을 선택하세요.");
-    setAssigning(true);
-    // 선택한 반의 정해진 회차를 자동 사용 (면접반: sessions_total, 없으면 기본 6)
-    const course = groupCourses.find((c) => c.id === pickCourse);
-    const totalSessions = course?.sessions_total ?? 6;
-    const { error } = await supabase.from("enrollments").insert({
-      student_id: selected.id, course_id: pickCourse,
-      total_sessions: totalSessions, remaining_sessions: totalSessions, status: "active",
-    });
-    setAssigning(false);
-    if (error) return alert("배정 실패: " + error.message);
-    setPickCourse("");
-    setShowAddEnroll(false);
-    await refreshKeepOpen();
-  };
-
-  const selectedOneCourse = oneCourses.find((c) => c.id === oneType);
-  const selTitle = selectedOneCourse?.title ?? "";
-  const isInterview = INTERVIEW_TITLES.includes(selTitle);
-  const isGongmuwon = selTitle === GONGMUWON;
-
-  const assignOne = async () => {
-    if (!oneType) return alert("1:1 종류를 선택하세요.");
-    if (!oneTeacher) return alert("담임 선생님을 선택하세요.");
-    setAssigning(true);
-    const { data: newEnr, error } = await supabase.from("enrollments").insert({
-      student_id: selected.id, course_id: oneType, teacher_id: oneTeacher,
-      total_sessions: oneSessions, remaining_sessions: oneSessions, status: "active",
-      exam_type: isGongmuwon ? examType : null,
-      company: isInterview && !isGongmuwon ? company : null,
-      job_role: isInterview ? jobRole : null,
-      career_level: isInterview ? careerLevel : null,
-    }).select().single();
-
-    if (error) { setAssigning(false); return alert("1:1 등록 실패: " + error.message); }
-
-    // 첫 수업 날짜가 있으면 lesson_bookings에 예약 생성 + 잔여 차감
-    if (firstDate && newEnr) {
-      const { error: bkErr } = await supabase.from("lesson_bookings").insert({
-        teacher_id: oneTeacher,
-        student_id: selected.id,
-        enrollment_id: newEnr.id,
-        date: firstDate,
-        start_time: firstTime,
-        end_time: firstEndTime || null,
-        branch_id: branchId || null,
-      });
-      if (bkErr) { setAssigning(false); return alert("첫 수업 예약 실패: " + bkErr.message); }
-      // 잔여 1 차감
-      if (oneSessions > 0) {
-        await supabase.from("enrollments")
-          .update({ remaining_sessions: oneSessions - 1 })
-          .eq("id", newEnr.id);
-      }
-    }
-
-    setAssigning(false);
-    setOneType(""); setOneTeacher(""); setExamType(""); setCompany("");
-    setJobRole(""); setCareerLevel(""); setFirstDate(""); setFirstTime("14:00");
-    setShowAddEnroll(false);
-    await refreshKeepOpen();
-  };
-
-  const deleteEnroll = async (enrollId) => {
-    if (!window.confirm("이 수강을 삭제할까요? (잘못 등록한 경우)")) return;
-    const { error } = await supabase.from("enrollments").delete().eq("id", enrollId);
-    if (error) return alert("삭제 실패: " + error.message);
-    await refreshKeepOpen();
-  };
-
-  // 기존 수강에 수업 예약 추가
-  const addBookingToEnroll = async (enroll) => {
-    const form = bookForm[enroll.id] ?? {};
-    if (!form.date) return alert("날짜를 선택하세요.");
-    if (!enroll.teacher_id) return alert("담임 선생님을 먼저 지정하고 저장하세요.");
-    const { error } = await supabase.from("lesson_bookings").insert({
-      teacher_id: enroll.teacher_id,
-      student_id: selected.id,
-      enrollment_id: enroll.id,
-      date: form.date,
-      start_time: form.time || "14:00",
-      end_time: form.endTime || null,
-      branch_id: branchId || null,
-    });
-    if (error) return alert("수업 예약 실패: " + error.message);
-    // 잔여 1 차감
-    if (enroll.remaining_sessions > 0) {
-      await supabase.from("enrollments")
-        .update({ remaining_sessions: enroll.remaining_sessions - 1 })
-        .eq("id", enroll.id);
-    }
-    setBookForm((p) => ({ ...p, [enroll.id]: { date: "", time: "14:00" } }));
-    await refreshKeepOpen();
-  };
-
-  const removeBooking = async (id) => {
-    if (!window.confirm("이 수업 예약을 삭제할까요?")) return;
-    // 삭제 전 정보 조회 후 잔여 복구
-    let target = null;
-    for (const key in bookingsMap) {
-      const found = (bookingsMap[key] ?? []).find((b) => b.id === id);
-      if (found) { target = found; break; }
-    }
-    await supabase.from("lesson_bookings").delete().eq("id", id);
-    if (target && target.enrollment_id) {
-      const { data: enr } = await supabase
-        .from("enrollments")
-        .select("remaining_sessions, total_sessions")
-        .eq("id", target.enrollment_id)
-        .single();
-      if (enr && enr.remaining_sessions < enr.total_sessions) {
-        await supabase.from("enrollments")
-          .update({ remaining_sessions: enr.remaining_sessions + 1 })
-          .eq("id", target.enrollment_id);
-      }
-    }
-    await refreshKeepOpen();
-  };
-
-  // ===== 면접 카테고리 배정 모달 (기존 질문생성 대체) =====
+  // ===== 면접 카테고리 배정 =====
   const openAssign = (student) => {
     const cur = interviewAssignMap[student.id];
     setAssignTarget({ student });
@@ -409,7 +329,6 @@ export default function StudentsTab({ branchId }) {
   const onPickCategory = (key) => {
     setAssignCategory(key);
     const cat = getCategory(key);
-    // 공무원이면 첫 세부 자동, 아니면 비움
     setAssignSub(cat?.subs?.length ? cat.subs[0].key : "");
   };
 
@@ -468,68 +387,145 @@ export default function StudentsTab({ branchId }) {
 
   const assignCat = assignCategory ? getCategory(assignCategory) : null;
 
+  // 목록에서 쓰는 버튼 묶음
+  const RowButtons = ({ s, hasAssign, block }) => {
+    const base = block ? "py-2 text-sm font-medium" : "whitespace-nowrap px-2 py-1 text-xs";
+    const gray = `${base} border border-slate-300 text-slate-600 hover:bg-slate-50`;
+    const blue = `${base} border border-seum-blue text-seum-blue hover:bg-blue-50`;
+    return (
+      <div className={block ? "grid grid-cols-3 gap-1.5" : "flex items-center gap-1"}>
+        <button type="button" onClick={() => openMemo(s)} className={gray}>수정</button>
+        <button type="button" onClick={() => openAdd(s)} className={blue}>재등록</button>
+        <button type="button" onClick={() => setFileTarget(s)} className={gray}>자료함</button>
+        <button type="button" onClick={() => setPayTarget(s)} className={blue}>결제</button>
+        <button
+          type="button"
+          onClick={() => openAssign(s)}
+          className={`${base} font-medium ${
+            hasAssign ? "bg-seum-blue text-white hover:bg-[#2a63c4]" : "border border-seum-blue text-seum-blue hover:bg-blue-50"
+          }`}
+        >
+          {hasAssign ? "면접수정" : "면접설정"}
+        </button>
+      </div>
+    );
+  };
+
   return (
     <div>
-      {/* 상태 탭 */}
-      <div className="mb-3 flex gap-2 overflow-x-auto">
-        {STATUS_TABS.map((t) => (
-          <button key={t.key} type="button" onClick={() => setStatusTab(t.key)}
-            className={`flex-shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition ${statusTab === t.key ? "bg-seum-blue text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* 필터 + 검색 한 줄 */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <select
+          value={branchFilter}
+          onChange={(e) => setBranchFilter(e.target.value)}
+          className="border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue"
+        >
+          <option value="all">전체 지점</option>
+          {branches.map((b) => (
+            <option key={b.id} value={b.id}>{b.name}</option>
+          ))}
+        </select>
 
-      {/* 검색 */}
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="이름·연락처·이메일 검색"
-          className="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
+        <select
+          value={statusTab}
+          onChange={(e) => setStatusTab(e.target.value)}
+          className="border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue"
+        >
+          {STATUS_TABS.map((t) => (
+            <option key={t.key} value={t.key}>{t.label}</option>
+          ))}
+        </select>
+
+        <select
+          value={payFilter}
+          onChange={(e) => setPayFilter(e.target.value)}
+          className={`border px-3 py-2 text-sm outline-none focus:border-seum-blue ${
+            payFilter === "unpaid" ? "border-red-400 text-red-500" : "border-slate-300"
+          }`}
+        >
+          <option value="all">결제 전체</option>
+          <option value="done">완납</option>
+          <option value="unpaid">미납</option>
+        </select>
+
+        {/* 가입일 */}
+        <div className="flex items-center gap-1">
+          <input
+            type="date"
+            value={joinDate}
+            onChange={(e) => setJoinDate(e.target.value)}
+            title="가입일"
+            className="border border-slate-300 px-2 py-2 text-sm text-slate-600 outline-none focus:border-seum-blue"
+          />
+          {joinDate && (
+            <button
+              type="button"
+              onClick={() => setJoinDate("")}
+              className="px-1 text-xs text-slate-400 hover:text-red-500"
+              title="가입일 지우기"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="이름·연락처·이메일 검색"
+          className="min-w-[180px] flex-1 border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue"
+        />
         <span className="flex-shrink-0 text-sm text-slate-500">{filtered.length}명</span>
       </div>
 
-      {/* 데스크탑: 표 (md 이상) */}
-      <div className="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white md:block">
+      {/* 데스크탑: 표 */}
+      <div className="hidden overflow-x-auto border border-slate-200 bg-white md:block">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+              <th className="px-4 py-3 font-medium">지점</th>
               <th className="px-4 py-3 font-medium">이름</th>
-              <th className="px-4 py-3 font-medium">연락처</th>
-              <th className="px-4 py-3 font-medium">수강</th>
-              <th className="px-4 py-3 font-medium">잔여</th>
+              <th className="whitespace-nowrap px-2 py-3 font-medium">연락처</th>
+              <th className="whitespace-nowrap px-2 py-3 font-medium">가입일</th>
+              <th className="whitespace-nowrap px-2 py-3 font-medium">수강</th>
+              <th className="whitespace-nowrap px-2 py-3 font-medium">잔여</th>
+              <th className="whitespace-nowrap px-2 py-3 font-medium">결제</th>
               <th className="px-4 py-3 font-medium">상태</th>
-              <th className="px-4 py-3 font-medium">관리</th>
+              <th className="whitespace-nowrap px-4 py-3 font-medium">관리</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400">해당하는 학생이 없습니다.</td></tr>
+              <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">해당하는 학생이 없습니다.</td></tr>
             ) : filtered.map((s) => {
               const stt = studentStatus(s.id);
               const sttLabel = stt === "active" ? "수강중" : stt === "done" ? "완료" : "등록대기";
               const sttColor = stt === "active" ? "bg-green-50 text-green-600" : stt === "done" ? "bg-slate-100 text-slate-500" : "bg-amber-50 text-amber-600";
-              const hasInterview = !!interviewEnroll(s.id);
               const badge = assignBadge(s.id);
+              const pay = payStatus(s.id);
               return (
                 <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="cursor-pointer px-4 py-3 font-medium text-seum-navy" onClick={() => openStudent(s)}>{s.name || "이름없음"}</td>
-                  <td className="cursor-pointer px-4 py-3 text-slate-500" onClick={() => openStudent(s)}>{s.phone || "-"}</td>
-                  <td className="cursor-pointer px-4 py-3 text-slate-600" onClick={() => openStudent(s)}>{enrollSummary(s.id)}</td>
-                  <td className="cursor-pointer px-4 py-3 text-slate-600" onClick={() => openStudent(s)}>{remainSummary(s.id)}</td>
-                  <td className="cursor-pointer px-4 py-3" onClick={() => openStudent(s)}><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${sttColor}`}>{sttLabel}</span></td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <button type="button" onClick={() => openStudent(s)} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">수정</button>
-                      <button
-                        type="button"
-                        onClick={() => openAssign(s)}
-                        disabled={!hasInterview}
-                        className={`rounded-md px-2.5 py-1 text-xs font-medium ${hasInterview ? "bg-seum-blue text-white hover:bg-[#2a63c4]" : "cursor-not-allowed bg-slate-100 text-slate-300"}`}
-                        title={hasInterview ? "면접 카테고리 배정" : "1:1 면접 수강생만 가능"}
-                      >
-                        면접설정
-                      </button>
-                      {badge && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-seum-blue">{badge}</span>}
-                    </div>
+                  <td className="px-4 py-3 text-xs text-slate-500">{branchName(s.branch_id)}</td>
+                  <td className="cursor-pointer px-4 py-3 font-medium text-seum-navy" onClick={() => openMemo(s)}>{s.name || "이름없음"}</td>
+                  <td className="whitespace-nowrap px-2 py-3 text-slate-500">{s.phone || "-"}</td>
+                  <td className="whitespace-nowrap px-2 py-3 text-xs text-slate-500">{fmtJoin(s.created_at)}</td>
+                  <td className="whitespace-nowrap px-2 py-3 text-slate-600">{enrollSummary(s.id)}</td>
+                  <td className="whitespace-nowrap px-2 py-3 text-slate-600">{remainSummary(s.id)}</td>
+                  <td className="whitespace-nowrap px-2 py-3">
+                    {pay ? (
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${pay.done ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
+                        {pay.label}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-300">-</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-3">
+                    <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${sttColor}`}>{sttLabel}</span>
+                    {badge && <span className="ml-1 whitespace-nowrap rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-seum-blue">{badge}</span>}
+                  </td>
+                  <td className="px-2 py-3">
+                    <RowButtons s={s} hasAssign={!!interviewAssignMap[s.id]} />
                   </td>
                 </tr>
               );
@@ -538,27 +534,35 @@ export default function StudentsTab({ branchId }) {
         </table>
       </div>
 
-      {/* 모바일: 카드 (md 미만) */}
+      {/* 모바일: 카드 */}
       <div className="space-y-3 md:hidden">
         {filtered.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">해당하는 학생이 없습니다.</p>
+          <p className="border border-dashed border-slate-300 py-10 text-center text-slate-400">해당하는 학생이 없습니다.</p>
         ) : filtered.map((s) => {
           const stt = studentStatus(s.id);
           const sttLabel = stt === "active" ? "수강중" : stt === "done" ? "완료" : "등록대기";
           const sttColor = stt === "active" ? "bg-green-50 text-green-600" : stt === "done" ? "bg-slate-100 text-slate-500" : "bg-amber-50 text-amber-600";
-          const hasInterview = !!interviewEnroll(s.id);
           const badge = assignBadge(s.id);
+          const pay = payStatus(s.id);
           return (
-            <div key={s.id} className="rounded-xl border border-slate-200 bg-white p-4">
-              <div className="flex items-start justify-between" onClick={() => openStudent(s)}>
+            <div key={s.id} className="border border-slate-200 bg-white p-4">
+              <div className="flex items-start justify-between">
                 <div className="min-w-0">
                   <p className="font-bold text-seum-navy">{s.name || "이름없음"}</p>
                   <p className="mt-0.5 text-xs text-slate-500">{s.phone || "연락처 없음"}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-400">{branchName(s.branch_id)} · 가입 {fmtJoin(s.created_at)}</p>
                 </div>
-                <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${sttColor}`}>{sttLabel}</span>
+                <div className="flex flex-shrink-0 flex-col items-end gap-1">
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${sttColor}`}>{sttLabel}</span>
+                  {pay && (
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${pay.done ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
+                      {pay.label}
+                    </span>
+                  )}
+                </div>
               </div>
 
-              <div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-sm" onClick={() => openStudent(s)}>
+              <div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-sm">
                 <div className="flex justify-between gap-3">
                   <span className="flex-shrink-0 text-slate-400">수강</span>
                   <span className="text-right text-slate-700">{enrollSummary(s.id)}</span>
@@ -575,276 +579,255 @@ export default function StudentsTab({ branchId }) {
                 )}
               </div>
 
-              <div className="mt-3 flex gap-2">
-                <button type="button" onClick={() => openStudent(s)} className="flex-1 rounded-lg border border-slate-300 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">수정</button>
-                <button
-                  type="button"
-                  onClick={() => openAssign(s)}
-                  disabled={!hasInterview}
-                  className={`flex-1 rounded-lg py-2 text-sm font-medium ${hasInterview ? "bg-seum-blue text-white hover:bg-[#2a63c4]" : "cursor-not-allowed bg-slate-100 text-slate-300"}`}
-                >
-                  면접설정
-                </button>
+              <div className="mt-3">
+                <RowButtons s={s} hasAssign={!!interviewAssignMap[s.id]} block />
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* 상세 모달 — 항상 편집 가능 */}
-      {selected && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={closeModal}>
-          <div className="my-8 w-full max-w-2xl space-y-5 rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+      {/* ===== 수정 (지점·수강 횟수·직업·메모) ===== */}
+      {memoTarget && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={() => setMemoTarget(null)}>
+          <div className="my-8 w-full max-w-lg space-y-5 bg-white p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold text-seum-navy">{selected.name}</h3>
+              <h3 className="text-lg font-bold text-seum-navy">{memoTarget.name}</h3>
               <div className="flex items-center gap-4">
-                <button type="button" onClick={saveAll} disabled={saving} className="rounded-lg bg-seum-blue px-4 py-1.5 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60">
+                <button type="button" onClick={saveMemo} disabled={saving} className="bg-seum-blue px-4 py-1.5 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60">
                   {saving ? "저장 중..." : "저장"}
                 </button>
-                <button type="button" onClick={closeModal} className="ml-1 text-lg text-slate-400 hover:text-slate-700">✕</button>
+                <button type="button" onClick={() => setMemoTarget(null)} className="ml-1 text-lg text-slate-400 hover:text-slate-700">✕</button>
               </div>
             </div>
-            <p className="text-sm text-slate-500">{selected.phone} · {selected.email}</p>
+            <p className="text-sm text-slate-500">{memoTarget.phone} · {memoTarget.email}</p>
 
-            {/* 직업 정보 */}
-            <div className="rounded-lg bg-slate-50 p-4">
-              <p className="mb-2 text-sm font-bold text-slate-600">직업 정보</p>
-              <div className="space-y-2">
-                <input value={jobStatus} onChange={(e) => setJobStatus(e.target.value)} placeholder="신분" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-                <input value={jobCompany} onChange={(e) => setJobCompany(e.target.value)} placeholder="현재 직장/소속" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-                <input value={jobPosition} onChange={(e) => setJobPosition(e.target.value)} placeholder="현재 직무/직책" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
+            <div>
+              <p className="mb-2 text-sm font-bold text-slate-600">지점</p>
+              <div className="flex gap-2">
+                {branches.map((b) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => setEditBranch(b.id)}
+                    className={`flex-1 border py-2.5 text-sm font-bold transition ${
+                      editBranch === b.id
+                        ? "border-seum-navy bg-seum-navy text-white"
+                        : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {b.name}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* 메모장 */}
+            {/* 수강 횟수 */}
             <div>
-              <h4 className="mb-2 font-bold text-seum-navy">메모장</h4>
-              <textarea value={memoText} onChange={(e) => setMemoText(e.target.value)} rows={6}
-                placeholder="학생 관련 메모를 자유롭게 작성하세요."
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-            </div>
-
-            {/* 결제 (결제창 발행 / 대기 / 완료) */}
-            <div className="rounded-lg border border-slate-200 p-4">
-              <StudentPaymentSection
-                student={selected}
-                branchId={branchId}
-                courses={[...groupCourses, ...oneCourses]}
-              />
-            </div>
-
-            {/* 수강 현황 — 항상 편집폼 */}
-            <div>
-              <h4 className="mb-2 font-bold text-seum-navy">수강 현황</h4>
-              {selectedEnroll.length === 0 ? (
-                <p className="mb-3 text-sm text-slate-400">배정된 반이 없습니다.</p>
+              <div className="mb-2 flex items-baseline justify-between">
+                <p className="text-sm font-bold text-slate-600">수강 횟수</p>
+                <p className="text-[11px] text-slate-400">총 횟수를 바꾸면 결제 기록과 맞는지 확인하세요</p>
+              </div>
+              {editEnrolls.length === 0 ? (
+                <p className="border border-dashed border-slate-300 py-4 text-center text-sm text-slate-400">
+                  등록된 수강이 없습니다.
+                </p>
               ) : (
-                <div className="mb-3 space-y-3">
-                  {selectedEnroll.map((e) => {
-                    const title = e.courses?.title ?? "";
-                    const isItv = INTERVIEW_TITLES.includes(title);
-                    const isGm = title === GONGMUWON;
-                    const isOne = e.courses?.type === "oneonone";
-                    const ed = enrollEdits[e.id] ?? {};
-                    const enrBookings = bookingsMap[e.id] ?? [];
-                    const bf = bookForm[e.id] ?? { date: "", time: "14:00" };
+                <div className="space-y-2">
+                  {editEnrolls.map((e) => {
+                    const changed = e.total !== e.origTotal || e.remaining !== e.origRemaining;
+                    const invalid = e.remaining > e.total;
                     return (
-                      <div key={e.id} className="rounded-lg bg-slate-50 px-4 py-3">
-                        <div className="mb-2 flex items-center justify-between">
-                          <span className="text-sm font-medium text-slate-700">
-                            {e.courses?.title}
-                            <span className="ml-2 text-xs text-slate-400">{isOne ? "1:1" : "단체반"}</span>
-                          </span>
-                          <button type="button" onClick={() => deleteEnroll(e.id)} className="rounded px-1.5 text-sm text-red-400 hover:bg-red-50 hover:text-red-600" title="수강 삭제">✕</button>
+                      <div
+                        key={e.id}
+                        className={`flex items-center justify-between gap-3 border px-3 py-2 ${
+                          invalid ? "border-red-300 bg-red-50" : changed ? "border-seum-blue bg-blue-50" : "border-slate-200 bg-white"
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold text-seum-navy">{e.title}</p>
+                          <p className="text-[11px] text-slate-400">
+                            {e.status === "active" ? "수강중" : e.status}
+                            {changed ? ` · ${e.origRemaining}/${e.origTotal}회에서 변경` : ""}
+                          </p>
                         </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className="w-14 text-xs text-slate-500">잔여/총</span>
-                          <input type="number" value={ed.remain ?? 0} onChange={(ev) => setEdit(e.id, "remain", ev.target.value)} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+                        <div className="flex flex-shrink-0 items-center gap-1">
+                          <input
+                            type="number"
+                            min={0}
+                            value={e.remaining}
+                            onChange={(ev) => setEnrollField(e.id, "remaining", ev.target.value)}
+                            title="잔여 횟수"
+                            className="w-16 border border-slate-300 px-2 py-1.5 text-center text-sm outline-none focus:border-seum-blue"
+                          />
                           <span className="text-sm text-slate-400">/</span>
-                          <input type="number" value={ed.total ?? 0} onChange={(ev) => setEdit(e.id, "total", ev.target.value)} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+                          <input
+                            type="number"
+                            min={0}
+                            value={e.total}
+                            onChange={(ev) => setEnrollField(e.id, "total", ev.target.value)}
+                            title="총 횟수"
+                            className="w-16 border border-slate-300 px-2 py-1.5 text-center text-sm outline-none focus:border-seum-blue"
+                          />
                           <span className="text-sm text-slate-500">회</span>
                         </div>
-
-                        {isOne && (
-                          <div className="mt-2 flex items-center gap-2">
-                            <span className="w-14 text-xs text-slate-500">담임</span>
-                            <select value={ed.teacher ?? ""} onChange={(ev) => setEdit(e.id, "teacher", ev.target.value)} className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue">
-                              <option value="">미지정</option>
-                              {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                            </select>
-                          </div>
-                        )}
-
-                        {isGm && (
-                          <div className="mt-2 flex gap-2">
-                            <select value={ed.examType ?? ""} onChange={(ev) => setEdit(e.id, "examType", ev.target.value)} className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue">
-                              <option value="">시험종류...</option>
-                              {EXAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                            </select>
-                            <input value={ed.jobRole ?? ""} onChange={(ev) => setEdit(e.id, "jobRole", ev.target.value)} placeholder="직렬" className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
-                          </div>
-                        )}
-
-                        {isItv && !isGm && (
-                          <div className="mt-2 flex gap-2">
-                            <input value={ed.company ?? ""} onChange={(ev) => setEdit(e.id, "company", ev.target.value)} placeholder="지원 회사명" className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
-                            <input value={ed.jobRole ?? ""} onChange={(ev) => setEdit(e.id, "jobRole", ev.target.value)} placeholder="지원 직무" className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
-                          </div>
-                        )}
-
-                        {isItv && (
-                          <div className="mt-2 flex gap-2">
-                            {CAREER_LEVELS.map((lv) => (
-                              <button type="button" key={lv} onClick={() => setEdit(e.id, "career", lv)} className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${ed.career === lv ? "border-seum-blue bg-blue-50 text-seum-blue" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}>{lv}</button>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* 1:1 수업 예약 (첫 수업 등) */}
-                        {isOne && (
-                          <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
-                            <p className="mb-1.5 text-xs font-bold text-seum-navy">수업 일정</p>
-                            {enrBookings.length === 0 ? (
-                              <p className="mb-2 text-xs text-slate-400">잡힌 수업이 없습니다.</p>
-                            ) : (
-                              <div className="mb-2 space-y-1">
-                                {enrBookings.map((b) => (
-                                  <div key={b.id} className="flex items-center justify-between rounded bg-blue-50 px-2 py-1 text-xs text-seum-blue">
-                                    <span>{bkDateFmt(b.date)} {b.start_time?.slice(0, 5)}</span>
-                                    <button type="button" onClick={() => removeBooking(b.id)} className="text-slate-400 hover:text-red-500">✕</button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <input type="date" value={bf.date} onChange={(ev) => setBookForm((p) => ({ ...p, [e.id]: { ...bf, date: ev.target.value } }))} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-seum-blue" />
-                              <input type="time" value={bf.time} onChange={(ev) => setBookForm((p) => ({ ...p, [e.id]: { ...bf, time: ev.target.value } }))} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-seum-blue" />
-                              <span className="text-xs text-slate-400">~</span>
-                              <input type="time" value={bf.endTime ?? "15:00"} onChange={(ev) => setBookForm((p) => ({ ...p, [e.id]: { ...bf, endTime: ev.target.value } }))} className="rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-seum-blue" />
-                              <button type="button" onClick={() => addBookingToEnroll(e)} className="rounded-lg bg-seum-blue px-3 py-1 text-xs font-bold text-white hover:bg-[#2a63c4]">수업 잡기</button>
-                            </div>
-                            <p className="mt-1 text-[11px] text-slate-400">※ 담임 지정 후 저장해야 예약할 수 있습니다.</p>
-                          </div>
-                        )}
                       </div>
                     );
                   })}
                 </div>
               )}
+            </div>
 
-              {/* 수강 추가 — 버튼 누르면 펼침 */}
-              {!showAddEnroll ? (
-                <button type="button" onClick={() => setShowAddEnroll(true)}
-                  className="w-full rounded-lg border border-dashed border-seum-blue py-2.5 text-sm font-medium text-seum-blue hover:bg-blue-50">
-                  + 수강 추가
-                </button>
-              ) : (
-                <div className="rounded-lg border border-dashed border-slate-300 p-4">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-medium text-slate-500">수강 추가</p>
-                    <button type="button" onClick={() => setShowAddEnroll(false)} className="text-xs text-slate-400 hover:text-slate-600">닫기</button>
-                  </div>
-                  <div className="mb-3 flex gap-2">
-                    <button type="button" onClick={() => setEnrollTab("group")} className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${enrollTab === "group" ? "bg-seum-blue text-white" : "bg-slate-100 text-slate-600"}`}>단체반</button>
-                    <button type="button" onClick={() => setEnrollTab("oneonone")} className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${enrollTab === "oneonone" ? "bg-seum-blue text-white" : "bg-slate-100 text-slate-600"}`}>1:1</button>
-                  </div>
+            <div className="bg-slate-50 p-4">
+              <p className="mb-2 text-sm font-bold text-slate-600">직업 정보</p>
+              <div className="space-y-2">
+                <input value={jobStatus} onChange={(e) => setJobStatus(e.target.value)} placeholder="신분" className="w-full border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
+                <input value={jobCompany} onChange={(e) => setJobCompany(e.target.value)} placeholder="현재 직장/소속" className="w-full border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
+                <input value={jobPosition} onChange={(e) => setJobPosition(e.target.value)} placeholder="현재 직무/직책" className="w-full border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
+              </div>
+            </div>
 
-                  {enrollTab === "group" && (
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                      <select value={pickCourse} onChange={(e) => setPickCourse(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue">
-                        <option value="">반 선택...</option>
-                        {groupCourses.filter((c) => c.branch_id === branchId).map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
-                      </select>
-                      {pickCourse && (
-                        <span className="text-sm text-slate-500">
-                          {(() => {
-                            const c = groupCourses.find((x) => x.id === pickCourse);
-                            const n = c?.sessions_total ?? 6;
-                            return `총 ${n}회`;
-                          })()}
-                        </span>
-                      )}
-                      <button type="button" onClick={assignGroup} disabled={assigning} className="rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60">배정</button>
-                    </div>
-                  )}
-
-                  {enrollTab === "oneonone" && (
-                    <div className="space-y-2">
-                      <select value={oneType} onChange={(e) => setOneType(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue">
-                        <option value="">종류 선택...</option>
-                        {oneCourses.map((c) => <option key={c.id} value={c.id}>{c.title.replace("1:1 ", "")}</option>)}
-                      </select>
-                      {isGongmuwon && (
-                        <div className="flex gap-2">
-                          <select value={examType} onChange={(e) => setExamType(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue">
-                            <option value="">시험종류...</option>
-                            {EXAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                          </select>
-                          <input value={jobRole} onChange={(e) => setJobRole(e.target.value)} placeholder="직렬" className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-                        </div>
-                      )}
-                      {isInterview && !isGongmuwon && (
-                        <div className="flex gap-2">
-                          <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="지원 회사명" className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-                          <input value={jobRole} onChange={(e) => setJobRole(e.target.value)} placeholder="지원 직무" className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-                        </div>
-                      )}
-                      {isInterview && (
-                        <div className="flex gap-2">
-                          {CAREER_LEVELS.map((lv) => (
-                            <button type="button" key={lv} onClick={() => setCareerLevel(lv)} className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${careerLevel === lv ? "border-seum-blue bg-blue-50 text-seum-blue" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}>{lv}</button>
-                          ))}
-                        </div>
-                      )}
-                      <div className="flex gap-2">
-                        <select value={oneTeacher} onChange={(e) => setOneTeacher(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue">
-                          <option value="">담임 선생님...</option>
-                          {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                        </select>
-                        <div className="flex items-center gap-1">
-                          <input type="number" value={oneSessions} onChange={(e) => setOneSessions(Number(e.target.value))} className="w-20 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-                          <span className="text-sm text-slate-500">회</span>
-                        </div>
-                      </div>
-
-                      {/* 첫 수업 날짜·시간 (선택) */}
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                        <p className="mb-1.5 text-xs font-medium text-slate-500">첫 수업 일정 (선택)</p>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <input type="date" value={firstDate} onChange={(e) => setFirstDate(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
-                          <input type="time" value={firstTime} onChange={(e) => setFirstTime(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
-                          <span className="text-sm text-slate-400">~</span>
-                          <input type="time" value={firstEndTime} onChange={(e) => setFirstEndTime(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
-                        </div>
-                        <p className="mt-1 text-[11px] text-slate-400">비워두면 선생님이 나중에 잡습니다.</p>
-                      </div>
-
-                      <button type="button" onClick={assignOne} disabled={assigning} className="w-full rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60">1:1 등록</button>
-                    </div>
-                  )}
-                </div>
-              )}
+            <div>
+              <p className="mb-2 text-sm font-bold text-slate-600">메모장</p>
+              <textarea value={memoText} onChange={(e) => setMemoText(e.target.value)} rows={8}
+                placeholder="학생 관련 메모를 자유롭게 작성하세요."
+                className="w-full border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
             </div>
           </div>
         </div>
       )}
 
-      {/* 면접 카테고리 배정 팝업 (기존 질문생성 모달 대체) */}
+      {/* ===== 재등록 ===== */}
+      {addTarget && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={() => setAddTarget(null)}>
+          <div className="my-8 w-full max-w-md space-y-4 bg-white p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-seum-navy">{addTarget.name} · 재등록</h3>
+              <button type="button" onClick={() => setAddTarget(null)} className="text-lg text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+
+            {addEnrolls.length === 0 ? (
+              <p className="bg-slate-50 px-3 py-4 text-center text-sm text-slate-400">
+                진행 중인 수강이 없습니다. 스케줄 화면에서 먼저 수강을 등록해주세요.
+              </p>
+            ) : (
+              <>
+                <div>
+                  <label className="mb-1 block text-xs text-slate-500">어느 수강을 재등록할까요?</label>
+                  <select
+                    value={addEnrollId}
+                    onChange={(e) => setAddEnrollId(e.target.value)}
+                    className="w-full border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue"
+                  >
+                    <option value="">선택...</option>
+                    {addEnrolls.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.courses?.title} (현재 {e.remaining_sessions}/{e.total_sessions}회)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs text-slate-500">재등록 횟수</label>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[3, 6, 10].map((n) => (
+                      <button key={n} type="button" onClick={() => setAddCount(n)}
+                        className={`border px-3 py-1.5 text-sm font-bold transition ${
+                          addCount === n ? "border-seum-blue bg-seum-blue text-white" : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                        }`}>
+                        {n}회
+                      </button>
+                    ))}
+                    <div className="flex items-center gap-1">
+                      <input type="number" min={1} value={addCount}
+                        onChange={(e) => setAddCount(Math.max(1, Number(e.target.value)))}
+                        className="w-16 border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-seum-blue" />
+                      <span className="text-sm text-slate-500">회</span>
+                    </div>
+                  </div>
+                </div>
+
+                <label className="flex cursor-pointer items-center gap-2 bg-slate-50 px-3 py-2">
+                  <input type="checkbox" checked={addPay} onChange={(e) => setAddPay(e.target.checked)} className="h-4 w-4 accent-seum-blue" />
+                  <span className="text-sm text-slate-700">결제도 함께 기록</span>
+                </label>
+
+                {addPay && (
+                  <div className="flex gap-2">
+                    {["현금", "계좌이체", "카드"].map((m) => (
+                      <button key={m} type="button" onClick={() => setAddMethod(m)}
+                        className={`flex-1 border py-2 text-sm font-medium transition ${
+                          addMethod === m ? "border-seum-blue bg-seum-blue text-white" : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                        }`}>
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {(() => {
+                  const e = addEnrolls.find((x) => x.id === addEnrollId);
+                  if (!e) return null;
+                  const after = (e.remaining_sessions ?? 0) + Number(addCount);
+                  const afterTotal = (e.total_sessions ?? 0) + Number(addCount);
+                  return (
+                    <p className="bg-blue-50 px-3 py-2 text-center text-sm font-bold text-seum-blue">
+                      {e.remaining_sessions}/{e.total_sessions}회 → {after}/{afterTotal}회
+                    </p>
+                  );
+                })()}
+
+                <button type="button" onClick={saveAdd} disabled={saving || !addEnrollId}
+                  className="w-full bg-seum-blue py-3 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60">
+                  {saving ? "저장 중..." : "재등록"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===== 자료함 모달 ===== */}
+      {fileTarget && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={() => setFileTarget(null)}>
+          <div className="my-8 w-full max-w-xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-seum-navy">{fileTarget.name} · 자료함</h3>
+              <button type="button" onClick={() => setFileTarget(null)} className="text-lg text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+            <StudentMaterialsView student={fileTarget} studentId={fileTarget.id} />
+          </div>
+        </div>
+      )}
+
+      {/* ===== 결제 모달 ===== */}
+      {payTarget && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={() => setPayTarget(null)}>
+          <div className="my-8 w-full max-w-xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-seum-navy">{payTarget.name} · 결제</h3>
+              <button type="button" onClick={() => setPayTarget(null)} className="text-lg text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+            <StudentPaymentSection student={payTarget} />
+          </div>
+        </div>
+      )}
+
+      {/* ===== 면접 카테고리 배정 팝업 ===== */}
       {assignTarget && (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={() => setAssignTarget(null)}>
-          <div className="my-8 w-full max-w-md space-y-4 rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="my-8 w-full max-w-md space-y-4 bg-white p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-seum-navy">면접 카테고리 배정</h3>
               <button type="button" onClick={() => setAssignTarget(null)} className="text-slate-400 hover:text-slate-700">✕</button>
             </div>
 
-            <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
+            <div className="bg-slate-50 p-4 text-sm text-slate-600">
               <p className="font-medium text-seum-navy">{assignTarget.student.name}</p>
               <p className="mt-0.5 text-xs">카테고리를 선택하면 학생 화면에 해당 질문이 자동으로 표시됩니다.</p>
             </div>
 
-            {/* 카테고리 선택 */}
             <div>
               <label className="mb-1.5 block text-xs text-slate-500">카테고리</label>
               <div className="grid grid-cols-2 gap-2">
@@ -853,7 +836,7 @@ export default function StudentsTab({ branchId }) {
                     key={c.key}
                     type="button"
                     onClick={() => onPickCategory(c.key)}
-                    className={`rounded-lg border px-3 py-2.5 text-sm font-medium transition ${
+                    className={`border px-3 py-2.5 text-sm font-medium transition ${
                       assignCategory === c.key
                         ? "border-seum-blue bg-blue-50 text-seum-blue"
                         : "border-slate-300 text-slate-600 hover:bg-slate-50"
@@ -865,7 +848,6 @@ export default function StudentsTab({ branchId }) {
               </div>
             </div>
 
-            {/* 공무원 세부 지역 */}
             {assignCat?.subs?.length ? (
               <div>
                 <label className="mb-1.5 block text-xs text-slate-500">세부 선택</label>
@@ -875,7 +857,7 @@ export default function StudentsTab({ branchId }) {
                       key={sub.key}
                       type="button"
                       onClick={() => setAssignSub(sub.key)}
-                      className={`flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition ${
+                      className={`flex-1 border px-3 py-2.5 text-sm font-medium transition ${
                         assignSub === sub.key
                           ? "border-seum-blue bg-blue-50 text-seum-blue"
                           : "border-slate-300 text-slate-600 hover:bg-slate-50"
@@ -888,9 +870,8 @@ export default function StudentsTab({ branchId }) {
               </div>
             ) : null}
 
-            {/* 선택된 탭 미리보기 */}
             {assignCat && (
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="border border-slate-200 bg-white p-3">
                 <p className="mb-1.5 text-xs font-medium text-slate-500">표시될 탭</p>
                 <div className="flex flex-wrap gap-1.5">
                   {assignCat.tabs.map((t) => (
@@ -906,7 +887,7 @@ export default function StudentsTab({ branchId }) {
                   type="button"
                   onClick={clearAssign}
                   disabled={assignSaving}
-                  className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-500 hover:bg-slate-50 disabled:opacity-60"
+                  className="border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-500 hover:bg-slate-50 disabled:opacity-60"
                 >
                   배정 해제
                 </button>
@@ -915,7 +896,7 @@ export default function StudentsTab({ branchId }) {
                 type="button"
                 onClick={saveAssign}
                 disabled={assignSaving}
-                className="flex-1 rounded-lg bg-seum-blue py-2.5 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60"
+                className="flex-1 bg-seum-blue py-2.5 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60"
               >
                 {assignSaving ? "저장 중..." : "저장"}
               </button>
