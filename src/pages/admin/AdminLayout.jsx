@@ -17,12 +17,13 @@ import PushNotificationButton from "./PushNotificationButton";
 
 // 학생 자료함은 수강생 관리 목록의 [자료함] 버튼으로 옮겼고,
 // 가입 승인은 신청서 제출과 동시에 자동 승인되므로 메뉴에서 뺀다
+// 들어오자마자 스케줄이 보이도록 전체 스케줄을 맨 위에 둔다
 const MENUS = [
+  { key: "schedule", label: "전체 스케줄" },
   { key: "dashboard", label: "대시보드" },
   { key: "courses", label: "반/수업 개설" },
   { key: "students", label: "수강생(수업) 관리" },
   { key: "teachers", label: "선생님 관리" },
-  { key: "schedule", label: "전체 스케줄" },
   { key: "consult", label: "상담 관리" },
   { key: "consultManual", label: "상담 매뉴얼" },
   { key: "inquiry", label: "1:1 문의(채팅)" },
@@ -34,7 +35,7 @@ const MENUS = [
 
 export default function AdminLayout() {
   const { profile, signOut } = useAuth();
-  const [active, setActive] = useState("dashboard");
+  const [active, setActive] = useState("schedule");
   const [menuOpen, setMenuOpen] = useState(false);
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(null);
@@ -79,6 +80,8 @@ export default function AdminLayout() {
 
   const renderContent = () => {
     switch (active) {
+      case "schedule":
+        return <AdminScheduleTab branchId={branchId} />;
       case "dashboard":
         return <DashboardTab />;
       case "courses":
@@ -87,8 +90,6 @@ export default function AdminLayout() {
         return <StudentsTab branchId={branchId} />;
       case "teachers":
         return <TeachersTab branchId={branchId} />;
-      case "schedule":
-        return <AdminScheduleTab branchId={branchId} />;
       case "consult":
         return <ConsultTab branchId={branchId} />;
       case "consultManual":
