@@ -34,6 +34,8 @@ export default defineConfig({
           /supabase/,
           /^\/schedule\.html/,
           /^\/schedule\.webmanifest/,
+          /^\/teacher-schedule\.html/,
+          /^\/teacher-schedule\.webmanifest/,
         ],
         importScripts: ["push-sw.js"],
       },

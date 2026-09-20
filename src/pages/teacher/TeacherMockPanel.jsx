@@ -56,6 +56,8 @@ export default function TeacherMockPanel({ student, teacherId, concept }) {
   const [fbEdits, setFbEdits] = useState({});
   const [savingFb, setSavingFb] = useState(null);
   const [sttId, setSttId] = useState(null);
+  const [aiId, setAiId] = useState(null);
+  const [aiAll, setAiAll] = useState(null);   // { done, total }
 
   const load = async () => {
     if (!student) return;
@@ -308,13 +310,95 @@ export default function TeacherMockPanel({ student, teacherId, concept }) {
     }
   };
 
+  // 한 문항 진단
+  const runAi = async (item, sim) => {
+    if (!item.transcript?.trim()) {
+      alert("음성 텍스트가 없습니다. 먼저 [음성 → 텍스트]를 눌러주세요.");
+      return null;
+    }
+
+    const { data, error } = await supabase.functions.invoke("interview-ai-mock", {
+      body: {
+        question: item.question_text,
+        transcript: item.transcript,
+        concept: concept || null,
+        scope: sim.question_type,
+        univ: sim.university,
+        major: sim.department,
+        speech: {
+          duration_sec: item.duration_sec,
+          speed_label: item.speed_label,
+          filler_count: item.filler_count,
+          pause_count: item.pause_count,
+          clarity_label: item.clarity_label,
+        },
+      },
+    });
+
+    if (error) {
+      let detail = error.message;
+      try {
+        const body = await error.context?.json();
+        detail = body?.error || detail;
+      } catch (_) {}
+      throw new Error(detail);
+    }
+    if (!data?.success) throw new Error(data?.error || "AI 실패");
+
+    const { data: saved, error: uErr } = await supabase
+      .from("univ_simulation_questions")
+      .update({ ai_feedback: data.feedback, ai_scores: data.scores })
+      .eq("id", item.id)
+      .select()
+      .maybeSingle();
+    if (uErr) throw uErr;
+
+    setItems((p) => p.map((x) => (x.id === item.id ? { ...x, ...saved } : x)));
+    return saved;
+  };
+
+  const genOne = async (item, sim) => {
+    setAiId(item.id);
+    try {
+      await runAi(item, sim);
+    } catch (e) {
+      alert("AI 진단 실패:\n\n" + e.message);
+    } finally {
+      setAiId(null);
+    }
+  };
+
+  // 이 모의고사 전체 진단
+  const genAll = async (sim) => {
+    const targets = items.filter((x) => x.transcript?.trim() && !x.ai_feedback);
+    if (targets.length === 0) {
+      return alert("진단할 문항이 없습니다. (텍스트가 없거나 이미 진단했습니다)");
+    }
+    if (!window.confirm(`${targets.length}문항을 진단합니다. 1문항당 10~20초 걸립니다.`)) return;
+
+    setAiAll({ done: 0, total: targets.length });
+    let fail = 0;
+    let firstErr = "";
+    for (let i = 0; i < targets.length; i++) {
+      try {
+        await runAi(targets[i], sim);
+      } catch (e) {
+        fail += 1;
+        if (!firstErr) firstErr = e.message;
+      }
+      setAiAll({ done: i + 1, total: targets.length });
+    }
+    setAiAll(null);
+    if (fail > 0) alert(`${targets.length}건 중 ${fail}건 실패했습니다.\n\n${firstErr}`);
+  };
+
   const saveFeedback = async (item) => {
     const text = (fbEdits[item.id] ?? "").trim();
     if (!text) return alert("피드백을 입력하세요.");
     setSavingFb(item.id);
     const { data, error } = await supabase
       .from("univ_simulation_questions")
-      .update({ teacher_feedback: text })
+      .update({ teacher_feedback: text, feedback_at: new Date().toISOString() })
       .eq("id", item.id)
       .select()
       .maybeSingle();
@@ -396,13 +480,28 @@ export default function TeacherMockPanel({ student, teacherId, concept }) {
 
                 {on && (
                   <div className="border-t border-slate-100 p-4">
+                    {items.length > 0 && (
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <span className="text-[11px] text-slate-400">
+                          진단 {items.filter((x) => x.ai_feedback).length} / {items.length}문항
+                        </span>
+                        <button type="button" onClick={() => genAll(ex)}
+                          disabled={!!aiAll}
+                          className="rounded-lg bg-seum-blue px-3 py-1.5 text-xs font-bold text-white hover:bg-[#2a63c4] disabled:opacity-50">
+                          {aiAll ? `진단 중... (${aiAll.done}/${aiAll.total})` : "✨ 전체 AI 진단"}
+                        </button>
+                      </div>
+                    )}
+
                     {itemsLoading ? (
                       <p className="py-6 text-center text-sm text-slate-400">불러오는 중...</p>
                     ) : items.length === 0 ? (
                       <p className="py-6 text-center text-sm text-slate-400">문항이 없습니다.</p>
                     ) : (
                       <div className="space-y-3">
-                        {items.map((it) => (
+                        {items.map((it) => {
+                          const fbDirty = (fbEdits[it.id] ?? "") !== (it.teacher_feedback ?? "");
+                          return (
                           <div key={it.id} className="rounded-lg border border-slate-200 p-3">
                             <p className="text-sm font-medium text-seum-navy">
                               <span className="mr-1 text-slate-400">{it.order}.</span>
@@ -463,17 +562,48 @@ export default function TeacherMockPanel({ student, teacherId, concept }) {
                               </div>
                             )}
 
-                            {it.ai_feedback && (
-                              <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            {/* AI 진단 — 선생님만 본다 */}
+                            <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50">
+                              <div className="flex items-center justify-between px-3 py-2">
                                 <p className="text-[11px] font-black text-slate-500">
-                                  AI 분석
+                                  AI 진단
                                   <span className="ml-1.5 rounded bg-slate-200 px-1.5 py-0.5 font-bold">선생님만 봄</span>
                                 </p>
-                                <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">
-                                  {it.ai_feedback}
-                                </p>
+                                <button type="button" onClick={() => genOne(it, ex)}
+                                  disabled={!it.transcript?.trim() || aiId === it.id || !!aiAll}
+                                  className="shrink-0 rounded-md border border-seum-blue px-2.5 py-0.5 text-xs font-bold text-seum-blue hover:bg-blue-50 disabled:opacity-40">
+                                  {aiId === it.id ? "진단 중..." : it.ai_feedback ? "🔄 다시" : "✨ AI 진단"}
+                                </button>
                               </div>
-                            )}
+
+                              {it.ai_feedback ? (
+                                <>
+                                  {Array.isArray(it.ai_scores) && it.ai_scores.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 border-t border-slate-200 px-3 py-2">
+                                      {it.ai_scores.map((sc) => (
+                                        <span key={sc.label}
+                                          className={`rounded px-2 py-0.5 text-[11px] font-bold ${
+                                            sc.grade === "상" ? "bg-green-50 text-green-700"
+                                            : sc.grade === "중" ? "bg-amber-50 text-amber-700"
+                                            : "bg-red-50 text-red-600"
+                                          }`}>
+                                          {sc.label} {sc.grade}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <p className="whitespace-pre-wrap border-t border-slate-200 px-3 py-2.5 text-sm leading-relaxed text-slate-600">
+                                    {it.ai_feedback}
+                                  </p>
+                                </>
+                              ) : (
+                                <p className="border-t border-slate-200 px-3 py-2.5 text-xs text-slate-400">
+                                  {it.transcript?.trim()
+                                    ? "아직 진단하지 않았습니다."
+                                    : "음성 텍스트가 있어야 진단할 수 있습니다."}
+                                </p>
+                              )}
+                            </div>
 
                             {/* 선생님 피드백 */}
                             <div className="mt-2">
@@ -484,16 +614,30 @@ export default function TeacherMockPanel({ student, teacherId, concept }) {
                                 placeholder="학생에게 전할 피드백"
                                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue"
                               />
-                              <div className="mt-1.5 flex justify-end">
+                              <div className="mt-1.5 flex items-center justify-end gap-2">
+                                {it.feedback_at && !fbDirty && (
+                                  <span className="text-[11px] text-slate-400">
+                                    {fmt(it.feedback_at)} 저장됨
+                                  </span>
+                                )}
                                 <button type="button" onClick={() => saveFeedback(it)}
-                                  disabled={savingFb === it.id}
-                                  className="rounded-lg bg-seum-blue px-3 py-1 text-xs font-bold text-white hover:bg-[#2a63c4] disabled:opacity-50">
-                                  {savingFb === it.id ? "저장 중..." : "피드백 저장"}
+                                  disabled={savingFb === it.id || !fbDirty}
+                                  className={`rounded-lg px-3 py-1 text-xs font-bold text-white transition disabled:opacity-100 ${
+                                    !fbDirty && it.teacher_feedback
+                                      ? "cursor-default bg-green-600"
+                                      : "bg-seum-blue hover:bg-[#2a63c4] disabled:opacity-40"
+                                  }`}>
+                                  {savingFb === it.id
+                                    ? "저장 중..."
+                                    : !fbDirty && it.teacher_feedback
+                                    ? "✓ 저장됨"
+                                    : "피드백 저장"}
                                 </button>
                               </div>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
