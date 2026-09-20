@@ -16,9 +16,9 @@ import {
 const FN_MAP = {
   gov: "interview-ai-gov",             // 공무원
   public_corp: "interview-ai-public",  // 공기업
+  univ: "interview-ai-univ",           // 대입 (컨셉·활동매칭·스피치구조)
   // company: "interview-ai-company",     // 사기업 (미배포)
   // hospital: "interview-ai-hospital",   // 병원 (미배포)
-  // univ: "interview-ai-univ",           // 대입 (미배포)
   // transfer: "interview-ai-transfer",   // 편입 (미배포)
   // highschool: "interview-ai-high",     // 고입 (미배포)
 };
@@ -150,17 +150,20 @@ function resolveSeriesLabel(categoryKey, subKey, key, dbLabel) {
 }
 
 // ============================================================
-// 선생님 단체반 모드
-// 반 선택 → 학생 선택 → 탭 → 그 학생의 질문/답변/피드백
+// 선생님 단체반 / 1:1 모드
+// 반 선택 → 학생 선택 → 컨셉 → 탭 → 그 학생의 질문/답변/피드백
+//
+// [면접 컨셉]
+// 선생님이 학생마다 적는 구체적인 진로 방향 (예: 소아암병동 간호사).
+// interview_assignments.concept 에 저장되고 학생 화면에도 보인다.
+// 대입 AI 피드백이 이 컨셉을 기준으로 답변을 본다.
 //
 // [기출문제 탭]
 // 학생이 자기 직렬을 골라 답변하므로, 그 학생이 답변한 문항의 series_key 로
-// 직렬을 역추적해서 자동 선택한다. 그 직렬의 문항 전체(답변/미답변 모두)를 보여준다.
-// 아직 답변이 하나도 없으면 직렬을 알 수 없으므로 직렬을 직접 고르게 한다.
+// 직렬을 역추적해서 자동 선택한다.
 //
 // [주의] interview_answers_v2 조회 시 question_id 를 .in(...) 으로 넘기지 말 것.
 // UUID가 전부 URL에 들어가 길이 한계를 넘고 서버가 400 으로 거절한다.
-// student_id 로만 가져와 JS에서 거른다.
 // ============================================================
 export default function TeacherClassInterview({ courseType = "group" }) {
   // courseType: "group"(단체반) | "oneonone"(1:1)
@@ -178,6 +181,11 @@ export default function TeacherClassInterview({ courseType = "group" }) {
   const [rows, setRows] = useState([]);   // 이 탭 전체 [{ ...question, _answer }]
   const [loading, setLoading] = useState(false);
 
+  // 면접 컨셉
+  const [concept, setConcept] = useState("");        // 입력창 값
+  const [savedConcept, setSavedConcept] = useState(""); // DB에 저장된 값
+  const [conceptSaving, setConceptSaving] = useState(false);
+
   // 기출 탭
   const [gichulView, setGichulView] = useState(null);      // 보고 있는 series_key (null = 미선택)
   const [studentSeries, setStudentSeries] = useState([]);  // 이 학생이 답변한 직렬
@@ -194,7 +202,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
 
-  // 1) 면접 단체반 로드
+  // 1) 면접 수업 로드
   useEffect(() => {
     (async () => {
       setClassesLoading(true);
@@ -226,9 +234,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
           );
           if (mine.length > 0) list = mine;
         } else {
-          // 1:1: 수업(1:1 공무원면접 등)은 전 선생님 공용이고,
-          // 담당은 enrollments.teacher_id 로 정해진다.
-          // 내가 담당하는 수강이 있는 수업만 남긴다.
+          // 1:1: 수업은 전 선생님 공용이고, 담당은 enrollments.teacher_id 로 정해진다.
           const { data: myEnr, error: enrErr } = await supabase
             .from("enrollments")
             .select("course_id")
@@ -276,7 +282,51 @@ export default function TeacherClassInterview({ courseType = "group" }) {
     })();
   }, [selClass, courseType, myId]);
 
-  // 3) 학생 선택 → 탭별 현황 집계
+  // 3) 학생 선택 → 컨셉 로드
+  useEffect(() => {
+    if (!selStudent) {
+      setConcept("");
+      setSavedConcept("");
+      return;
+    }
+    let alive = true;
+    (async () => {
+      const { data } = await supabase
+        .from("interview_assignments")
+        .select("concept")
+        .eq("student_id", selStudent.id)
+        .maybeSingle();
+      if (!alive) return;
+      const c = data?.concept ?? "";
+      setConcept(c);
+      setSavedConcept(c);
+    })();
+    return () => { alive = false; };
+  }, [selStudent]);
+
+  // 컨셉 저장 — 학생 화면에도 바로 보인다
+  const saveConcept = async () => {
+    if (!selStudent || !selClass) return;
+    setConceptSaving(true);
+    const { category_key, sub_key } = selClass.assignment;
+    const { error } = await supabase
+      .from("interview_assignments")
+      .upsert(
+        {
+          student_id: selStudent.id,
+          category_key,
+          sub_key: sub_key ?? null,
+          concept: concept.trim() || null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "student_id" }
+      );
+    setConceptSaving(false);
+    if (error) return alert("컨셉 저장 실패: " + error.message);
+    setSavedConcept(concept.trim());
+  };
+
+  // 4) 학생 선택 → 탭별 현황 집계
   useEffect(() => {
     if (!selClass || !selStudent) {
       setTabStats({});
@@ -288,9 +338,6 @@ export default function TeacherClassInterview({ courseType = "group" }) {
     (async () => {
       const { category_key, sub_key } = selClass.assignment;
 
-      // 먼저 해당 카테고리의 활성 질문을 모두 가져온다.
-      // 기출문제는 sub_key가 반 배정값과 다르거나 NULL이어도
-      // 직렬(series_key)을 기준으로 사용하므로 sub_key로 제한하지 않는다.
       const { data: allQuestions, error: qErr } = await supabase
         .from("interview_questions_v2")
         .select("id, tab_key, sub_key")
@@ -307,7 +354,6 @@ export default function TeacherClassInterview({ courseType = "group" }) {
 
       const questions = (allQuestions ?? []).filter((question) => {
         if (isSharedContent(category_key, question.tab_key)) return true;
-
         return sub_key
           ? question.sub_key === sub_key
           : question.sub_key == null;
@@ -323,8 +369,6 @@ export default function TeacherClassInterview({ courseType = "group" }) {
         return;
       }
 
-      // question_id 목록을 .in(...)으로 보내지 않는다.
-      // 문항이 많으면 URL 길이 초과로 Supabase가 400을 반환할 수 있다.
       const { data: ans, error: aErr } = await supabase
         .from("interview_answers_v2")
         .select("question_id, student_answer, teacher_feedback")
@@ -344,29 +388,19 @@ export default function TeacherClassInterview({ courseType = "group" }) {
         const tabKey = tabOf[answer.question_id];
         if (!tabKey) return;
 
-        stats[tabKey] = stats[tabKey] || {
-          answered: 0,
-          feedbacked: 0,
-        };
+        stats[tabKey] = stats[tabKey] || { answered: 0, feedbacked: 0 };
 
-        if (answer.student_answer?.trim()) {
-          stats[tabKey].answered += 1;
-        }
-
-        if (answer.teacher_feedback?.trim()) {
-          stats[tabKey].feedbacked += 1;
-        }
+        if (answer.student_answer?.trim()) stats[tabKey].answered += 1;
+        if (answer.teacher_feedback?.trim()) stats[tabKey].feedbacked += 1;
       });
 
       setTabStats(stats);
     })();
 
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [selClass, selStudent]);
 
-  // 4) 탭 로드 — 선택 학생 기준
+  // 5) 탭 로드 — 선택 학생 기준
   const loadTab = async () => {
     if (!selClass || !selStudent || !activeTab) {
       setRows([]);
@@ -388,20 +422,13 @@ export default function TeacherClassInterview({ courseType = "group" }) {
         .eq("is_active", true)
         .order("seq", { ascending: true });
 
-      // 기출문제는 sub_key가 반 배정값과 다르거나 NULL이어도
-      // 직렬(series_key)을 기준으로 선택하므로 sub_key로 제한하지 않는다.
-      // 기출·PT·토론은 지역(sub_key) 구분 없이 전 지역 공통으로 쓴다.
       if (!isSharedContent(category_key, activeTab)) {
-        q = sub_key
-          ? q.eq("sub_key", sub_key)
-          : q.is("sub_key", null);
+        q = sub_key ? q.eq("sub_key", sub_key) : q.is("sub_key", null);
       }
 
       const { data: qs, error: qErr } = await q;
 
-      if (qErr) {
-        throw qErr;
-      }
+      if (qErr) throw qErr;
 
       const questionList = qs ?? [];
       const idSet = new Set(questionList.map((question) => question.id));
@@ -409,25 +436,17 @@ export default function TeacherClassInterview({ courseType = "group" }) {
       const edits = {};
 
       if (idSet.size > 0) {
-        // question_id를 .in(...)으로 보내지 않는다.
-        // 문항이 많으면 URL 길이 초과로 Supabase가 400을 반환할 수 있다.
         const { data: ans, error: aErr } = await supabase
           .from("interview_answers_v2")
           .select("*")
           .eq("student_id", selStudent.id);
 
-        if (aErr) {
-          throw aErr;
-        }
+        if (aErr) throw aErr;
 
         (ans ?? []).forEach((answer) => {
           if (!idSet.has(answer.question_id)) return;
-
           ansMap[answer.question_id] = answer;
-          edits[answer.id] =
-            answer.teacher_feedback ??
-            answer.ai_draft ??
-            "";
+          edits[answer.id] = answer.teacher_feedback ?? answer.ai_draft ?? "";
         });
       }
 
@@ -436,10 +455,8 @@ export default function TeacherClassInterview({ courseType = "group" }) {
         _answer: ansMap[question.id] ?? null,
       }));
 
-      // 지역별 사본이 합쳐지는 탭은 같은 질문을 한 번만 보여준다.
       if (isSharedContent(category_key, activeTab)) merged = dedupeByQuestion(merged);
 
-      // 기출: 학생이 답변한 문항의 직렬을 역추적해 자동 선택
       if (activeTab === "gichul") {
         const detected = Array.from(
           new Set(
@@ -448,7 +465,6 @@ export default function TeacherClassInterview({ courseType = "group" }) {
               .map((row) => row.series_key ?? NO_SERIES)
           )
         );
-
         setStudentSeries(detected);
         setGichulView(detected[0] ?? null);
         setShowAllSeries(false);
@@ -468,11 +484,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
       setGichulView(null);
       setShowAllSeries(false);
 
-      alert(
-        `질문을 불러오지 못했습니다.\n\n${
-          error?.message ?? "알 수 없는 오류"
-        }`
-      );
+      alert(`질문을 불러오지 못했습니다.\n\n${error?.message ?? "알 수 없는 오류"}`);
     } finally {
       setLoading(false);
     }
@@ -484,12 +496,10 @@ export default function TeacherClassInterview({ courseType = "group" }) {
   // ── 화면에 보일 목록 계산 ─────────────────────────────
   const isGichul = activeTab === "gichul";
   const isPt = activeTab === "pt";
+  const isUniv = selClass?.assignment?.category_key === "univ";
 
-  // 직렬 키를 화면용 한글 명칭으로 변환한다.
-  // 우선순위: DB 한글 라벨 → interviewConfig 한글 라벨 → 자체 한글 매핑.
   const seriesLabelMap = rows.reduce((acc, row) => {
     const key = row.series_key ?? NO_SERIES;
-
     if (!acc[key]) {
       acc[key] = resolveSeriesLabel(
         selClass?.assignment?.category_key,
@@ -498,11 +508,9 @@ export default function TeacherClassInterview({ courseType = "group" }) {
         row.series_label
       );
     }
-
     return acc;
   }, {});
 
-  // 이 탭 전체 직렬 목록 (문항 수 많은 순)
   const allSeries = isGichul
     ? Object.entries(
         rows.reduce((acc, row) => {
@@ -513,7 +521,6 @@ export default function TeacherClassInterview({ courseType = "group" }) {
       ).sort((a, b) => b[1] - a[1])
     : [];
 
-  // 학생 직렬이 파악되면 그것만, 아니면 전체를 버튼으로
   const seriesButtons =
     showAllSeries || studentSeries.length === 0
       ? allSeries
@@ -543,6 +550,10 @@ export default function TeacherClassInterview({ courseType = "group" }) {
         series_key: qRow.series_key ?? null,
         question: qRow.question,
         answer: answerRow.student_answer,
+        // 대입 피드백용 — 저장된 컨셉과 이 질문의 스피치 구조
+        concept: savedConcept || null,
+        speech_structure: qRow.speech_structure ?? null,
+        structure_name: qRow.structure_name ?? null,
       },
     });
 
@@ -657,6 +668,8 @@ export default function TeacherClassInterview({ courseType = "group" }) {
     (r) => r._answer?.student_answer?.trim() && !r._answer.teacher_feedback
   ).length;
 
+  const conceptDirty = concept.trim() !== (savedConcept ?? "").trim();
+
   if (classesLoading) return <p className="text-slate-400">{MODE_LABEL} 불러오는 중...</p>;
 
   return (
@@ -728,6 +741,39 @@ export default function TeacherClassInterview({ courseType = "group" }) {
             </p>
           ) : (
             <>
+              {/* 면접 컨셉 */}
+              <div className="mb-5 border-t border-slate-200 pt-4">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-sm font-medium text-slate-500">면접 컨셉</p>
+                  {savedConcept ? (
+                    <span className="text-[11px] text-slate-400">학생 화면에도 표시됩니다</span>
+                  ) : (
+                    <span className="text-[11px] font-bold text-amber-600">아직 정해지지 않았습니다</span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={concept}
+                    onChange={(e) => setConcept(e.target.value)}
+                    placeholder="예: 소아암병동 간호사 / 자율주행 제어 엔지니어"
+                    className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveConcept}
+                    disabled={conceptSaving || !conceptDirty}
+                    className="shrink-0 rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-50"
+                  >
+                    {conceptSaving ? "저장 중..." : conceptDirty ? "저장" : "✓ 저장됨"}
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  {isUniv
+                    ? "학생이 내세울 구체적인 진로 방향을 적으세요. AI가 이 컨셉을 기준으로 답변과 활동이 맞는지 봅니다."
+                    : "학생이 내세울 구체적인 진로 방향을 적으세요. 현재 AI 피드백은 대입 면접에서만 컨셉을 사용합니다."}
+                </p>
+              </div>
+
               {/* 탭 */}
               <div className="mb-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
                 {tabs.map((t) => {
@@ -833,7 +879,6 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                     const a = qRow._answer;
                     const hasAnswer = !!a?.student_answer?.trim();
 
-                    // 현재 편집중인 텍스트가 확정된 피드백과 같은지
                     const confirmed =
                       !!a?.teacher_feedback &&
                       (draftEdits[a.id] ?? "").trim() === a.teacher_feedback.trim();
@@ -866,6 +911,18 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                             )}
                           </span>
                         </div>
+
+                        {/* 이 질문의 스피치 구조 */}
+                        {qRow.speech_structure && (
+                          <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-2">
+                            <p className="text-[11px] font-bold text-seum-blue">
+                              스피치 구조{qRow.structure_name ? ` · ${qRow.structure_name}` : ""}
+                            </p>
+                            <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
+                              {qRow.speech_structure}
+                            </p>
+                          </div>
+                        )}
 
                         {hasAnswer ? (
                           <>

@@ -15,6 +15,10 @@ import {
   getSeriesLabel,
 } from "../../lib/interviewConfig";
 
+// 답변은 카테고리와 상관없이 이 테이블 한 곳에 모은다.
+// (대입도 여기에 저장한다 — 선생님 화면이 이 테이블을 읽는다)
+const ANSWER_TABLE = "interview_answers_v2";
+
 const AXES = [
   { key: "소통·공감", label: "소통 · 공감", re: /소통\s*[·ㆍ・]?\s*공감/ },
   { key: "헌신·열정", label: "헌신 · 열정", re: /헌신\s*[·ㆍ・]?\s*열정/ },
@@ -386,17 +390,13 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const questionsRef = useRef(questions);
   questionsRef.current = questions;
 
-  // 대입은 univ_answers, 그 외는 interview_answers_v2에 답변을 저장한다.
-  const isUnivCat = assignment?.category_key === "univ";
-  const answerTable = isUnivCat ? "univ_answers" : "interview_answers_v2";
-
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       const { data: personal } = await supabase
         .from("interview_assignments")
-        .select("category_key, sub_key")
+        .select("category_key, sub_key, concept")
         .eq("student_id", studentId)
         .maybeSingle();
 
@@ -426,13 +426,13 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     return () => { alive = false; };
   }, [studentId]);
 
-  // 답변 맵을 붙여 반환 (카테고리에 따라 답변 테이블이 다름)
+  // 답변 맵을 붙여 반환
   const attachAnswers = async (questionList) => {
     const ids = questionList.map((x) => x.id);
     let answerMap = {};
     if (ids.length > 0) {
       const { data: ans } = await supabase
-        .from(answerTable)
+        .from(ANSWER_TABLE)
         .select("*")
         .eq("student_id", studentId)
         .in("question_id", ids);
@@ -549,7 +549,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       .channel(`itv-ans-${studentId}-${Date.now()}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: answerTable, filter: `student_id=eq.${studentId}` },
+        { event: "*", schema: "public", table: ANSWER_TABLE, filter: `student_id=eq.${studentId}` },
         (payload) => {
           const row = payload.new;
           if (!row) return;
@@ -560,7 +560,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [studentId, answerTable]);
+  }, [studentId]);
 
   const persistAnswer = async (questionId, text, submit = false) => {
     const now = new Date().toISOString();
@@ -571,12 +571,10 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       answered_at: now,
       updated_at: now,
     };
-    // univ_answers는 어느 탭의 답변인지 함께 저장한다.
-    if (isUnivCat) payload.tab_key = activeTab;
     if (submit) payload.submitted_at = now;
 
     const { data, error } = await supabase
-      .from(answerTable)
+      .from(ANSWER_TABLE)
       .upsert(payload, { onConflict: "question_id,student_id" })
       .select()
       .maybeSingle();
@@ -893,6 +891,16 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
             : "작성 중인 내용은 자동 저장됩니다. 저장 버튼을 눌러야 선생님께 전달됩니다."}
         </p>
       </div>
+
+      {assignment.concept && (
+        <div className="no-print mb-4 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
+          <p className="text-[11px] font-black tracking-wide text-seum-blue">내 면접 컨셉</p>
+          <p className="mt-0.5 text-base font-bold text-seum-navy">{assignment.concept}</p>
+          <p className="mt-1 text-xs text-slate-500">
+            선생님이 정해준 방향이에요. 답변과 활동이 이 컨셉과 이어지도록 써보세요.
+          </p>
+        </div>
+      )}
 
       {locked && (
         <div className="no-print mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
