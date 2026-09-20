@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { supabase } from "../../lib/supabase";
 import MaterialsTab from "./MaterialsTab";
@@ -11,6 +12,20 @@ import AbsenceRequestTab from "./AbsenceRequestTab";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
+// 주소(?tab=)로 들어올 수 있는 메뉴 키.
+// 면접 메뉴는 수강 상태에 따라 보였다 안 보였다 하지만,
+// 주소 검사는 이 목록으로 한다. (불러오는 중에 엉뚱한 탭으로 튀지 않게)
+const ALL_KEYS = [
+  "courses",
+  "absence",
+  "materials",
+  "homework",
+  "interview",
+  "chat",
+  "payments",
+  "notifications",
+];
+
 const isExpired = (e) => {
   if (!e.expires_at) return false;
   const today = new Date();
@@ -22,7 +37,17 @@ const isExpired = (e) => {
 
 export default function StudentLayout() {
   const { profile, signOut } = useAuth();
-  const [active, setActive] = useState("courses");
+
+  // 어느 메뉴를 보고 있는지 주소에 남긴다 (?tab=homework).
+  // 그래야 브라우저 뒤로가기가 로그인 화면이 아니라 이전 메뉴로 간다.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get("tab");
+  const active = ALL_KEYS.includes(tabFromUrl) ? tabFromUrl : "courses";
+  const setActive = (key) => {
+    if (key === active) return;
+    setSearchParams({ tab: key });   // 기록에 쌓여서 뒤로가기가 동작한다
+  };
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [enrollments, setEnrollments] = useState([]);
   const [hasAssignment, setHasAssignment] = useState(false);

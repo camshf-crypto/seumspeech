@@ -13,11 +13,18 @@ import {
   getMaterials,
   getTabLabel,
   getSeriesLabel,
+  getStudentTabs,
 } from "../../lib/interviewConfig";
 
 // 답변은 카테고리와 상관없이 이 테이블 한 곳에 모은다.
 // (대입도 여기에 저장한다 — 선생님 화면이 이 테이블을 읽는다)
 const ANSWER_TABLE = "interview_answers_v2";
+
+// 한 문항당 연습 회차는 3차까지. 3차 뒤에 또 고치면 3차를 다시 쓴다.
+const MAX_ROUND = 3;
+
+// 선생님이 학생마다 따로 만드는 질문 탭
+const PERSONAL_TAB = "saenggibu";
 
 const AXES = [
   { key: "소통·공감", label: "소통 · 공감", re: /소통\s*[·ㆍ・]?\s*공감/ },
@@ -49,6 +56,16 @@ const dedupeByQuestion = (rows) => {
     if (!prev || score(r) > score(prev)) byText.set(key, r);
   });
   return Array.from(byText.values());
+};
+
+// 저장(전달) 버튼을 실제로 눌렀는지 판단한다.
+// 자동 임시저장은 answered_at 만 갱신하므로,
+// submitted_at 이 answered_at 보다 앞서면 아직 전달 전이다.
+const isSubmitted = (a, text) => {
+  if (!a?.submitted_at || !text?.trim()) return false;
+  if (text !== (a.student_answer ?? "")) return false;
+  if (a.answered_at && new Date(a.submitted_at) < new Date(a.answered_at)) return false;
+  return true;
 };
 
 const PRINT_CSS = `
@@ -418,8 +435,8 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       if (!alive) return;
       setAssignment(resolved);
       if (resolved) {
-        const cat = getCategory(resolved.category_key);
-        if (cat?.tabs?.length) setActiveTab(cat.tabs[0].key);
+        const t = getStudentTabs(resolved.category_key);
+        if (t.length) setActiveTab(t[0].key);
       }
       setLoading(false);
     })();
@@ -489,6 +506,24 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     // 대입 기출문제는 별도 테이블(univ_questions)에서 조회
     if (categoryKey === "univ" && tabKey === "gichul") {
       await loadUnivGichul(univPick);
+      return;
+    }
+
+    // 생기부는 선생님이 나에게만 만들어준 질문을 본다
+    if (tabKey === PERSONAL_TAB) {
+      setLoadingQ(true);
+      const { data, error } = await supabase
+        .from("student_questions")
+        .select("*")
+        .eq("student_id", studentId)
+        .eq("tab_key", PERSONAL_TAB)
+        .eq("is_active", true)
+        .not("sent_at", "is", null)   // 선생님이 보낸 질문만
+        .order("seq");
+      if (error) console.error("student_questions 조회 실패:", error);
+      const merged = await attachAnswers(data ?? []);
+      applyQuestions(merged);
+      setLoadingQ(false);
       return;
     }
 
@@ -562,6 +597,64 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     return () => { supabase.removeChannel(channel); };
   }, [studentId]);
 
+  // 회차 기록 — 선생님이 피드백을 준 뒤에 다시 저장하면 다음 회차가 열린다
+  const syncRound = async (questionId, text, now) => {
+    const { data: last } = await supabase
+      .from("interview_rounds")
+      .select("id, round, teacher_feedback")
+      .eq("question_id", questionId)
+      .eq("student_id", studentId)
+      .order("round", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // 첫 답변
+    if (!last) {
+      await supabase.from("interview_rounds").insert({
+        question_id: questionId,
+        student_id: studentId,
+        round: 1,
+        student_answer: text,
+        answered_at: now,
+      });
+      return;
+    }
+
+    // 아직 피드백 전이면 같은 회차를 고친다
+    if (!last.teacher_feedback) {
+      await supabase
+        .from("interview_rounds")
+        .update({ student_answer: text, answered_at: now })
+        .eq("id", last.id);
+      return;
+    }
+
+    // 마지막 회차까지 왔으면 새로 만들지 않고 그 회차를 고쳐 쓴다
+    if (last.round >= MAX_ROUND) {
+      await supabase
+        .from("interview_rounds")
+        .update({
+          student_answer: text,
+          answered_at: now,
+          teacher_answer: null,
+          teacher_feedback: null,
+          ai_draft: null,
+          feedback_at: null,
+        })
+        .eq("id", last.id);
+      return;
+    }
+
+    // 피드백을 받은 뒤 고쳐 썼으면 다음 회차
+    await supabase.from("interview_rounds").insert({
+      question_id: questionId,
+      student_id: studentId,
+      round: last.round + 1,
+      student_answer: text,
+      answered_at: now,
+    });
+  };
+
   const persistAnswer = async (questionId, text, submit = false) => {
     const now = new Date().toISOString();
     const payload = {
@@ -579,6 +672,16 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       .select()
       .maybeSingle();
     if (error) throw error;
+
+    // 선생님께 전달하는 저장일 때만 회차에 기록한다 (자동 임시저장은 제외)
+    if (submit) {
+      try {
+        await syncRound(questionId, text, now);
+      } catch (e) {
+        console.error("회차 기록 실패:", e.message);
+      }
+    }
+
     setQuestions((prev) =>
       prev.map((x) => (x.id === questionId ? { ...x, _answer: { ...(x._answer || {}), ...data } } : x))
     );
@@ -658,7 +761,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
   const cat = getCategory(assignment.category_key);
   const subLabel = getSubLabel(assignment.category_key, assignment.sub_key);
-  const tabs = cat?.tabs ?? [];
+  const tabs = getStudentTabs(assignment.category_key);   // 모의고사 탭은 선생님 전용
   const seriesList = getSeries(assignment.category_key, assignment.sub_key);
 
   const isUniv = assignment.category_key === "univ";
@@ -773,6 +876,9 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
     if (questions.length === 0) {
       let hint = "이 탭에 등록된 질문이 아직 없습니다.";
+      if (activeTab === PERSONAL_TAB) {
+        hint = "선생님이 아직 생기부 예상질문을 만들지 않았어요.";
+      }
       if (showSeriesPicker && !activeSeries) {
         hint = "직렬을 선택하면 해당 직렬의 기출문제가 표시됩니다.";
       } else if (showUnivPicker && !univPick) {
@@ -785,16 +891,24 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       );
     }
 
+    // 꼬리질문은 원 질문 카드 안에 붙여서 보여준다
+    const childMap = {};
+    questions.forEach((q) => {
+      if (!q.parent_id) return;
+      (childMap[q.parent_id] = childMap[q.parent_id] || []).push(q);
+    });
+    const topQuestions = questions.filter((q) => !q.parent_id);
+
     return (
       <div className="space-y-4">
-        {questions.map((q, i) => {
+        {topQuestions.map((q, i) => {
           const a = q._answer;
           const fb = a?.teacher_feedback || "";
           const grades = fb ? parseGrades(fb) : null;
           const fbText = grades ? stripDiagnosis(fb) : fb;
           const t = answers[q.id] ?? "";
           const dirty = t !== (a?.student_answer ?? "");
-          const submitted = !!a?.submitted_at && !dirty && !!t.trim();
+          const submitted = isSubmitted(a, t);
 
           return (
             <div
@@ -851,11 +965,82 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                 </button>
               </div>
 
+              {/* 선생님이 고쳐준 답변 — 내 답변은 그대로 두고 따로 보여준다 */}
+              {a?.teacher_answer ? (
+                <div className="no-print mt-3 rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-3">
+                  <p className="text-[11px] font-black tracking-wide text-amber-700">선생님이 고쳐준 답변</p>
+                  <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                    {a.teacher_answer}
+                  </p>
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    내 답변과 비교해보고, 위 칸을 직접 고쳐 쓰면서 연습해보세요.
+                  </p>
+                </div>
+              ) : null}
+
               {fb ? (
                 <FeedbackAccordion grades={grades} text={fbText} />
               ) : submitted ? (
                 <p className="no-print mt-3 text-xs text-slate-400">선생님 피드백을 기다리는 중이에요.</p>
               ) : null}
+
+              {/* 꼬리질문 — 선생님이 이 답변을 보고 이어서 물은 질문 */}
+              {(childMap[q.id] ?? []).map((c) => {
+                const ca = c._answer;
+                const ct = answers[c.id] ?? "";
+                const cDirty = ct !== (ca?.student_answer ?? "");
+                const cSubmitted = isSubmitted(ca, ct);
+                const cfb = ca?.teacher_feedback || "";
+                const cGrades = cfb ? parseGrades(cfb) : null;
+                const cfbText = cGrades ? stripDiagnosis(cfb) : cfb;
+
+                return (
+                  <div key={c.id} className="no-print mt-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
+                    <p className="mb-1.5 text-[11px] font-black tracking-wide text-emerald-700">꼬리질문</p>
+                    <p className="mb-2 font-medium text-seum-navy">{c.question}</p>
+
+                    <textarea
+                      value={ct}
+                      onChange={(e) => setAnswers((p) => ({ ...p, [c.id]: e.target.value }))}
+                      rows={3}
+                      disabled={locked}
+                      placeholder={locked ? "수강 종료로 답변을 작성할 수 없습니다." : "답변을 작성하세요. 자동 저장됩니다."}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
+                    />
+
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      {cSubmitted ? (
+                        <span className="text-xs font-bold text-green-600">✓ 선생님께 전달됨</span>
+                      ) : ct.trim() ? (
+                        <span className="text-xs text-amber-500">저장을 눌러 선생님께 전달하세요</span>
+                      ) : (
+                        <span className="text-xs text-slate-400">미작성</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => saveAnswer(c)}
+                        disabled={savingId === c.id || locked || cSubmitted}
+                        className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
+                          cSubmitted ? "cursor-default bg-green-600" : "bg-emerald-600 hover:bg-emerald-700"
+                        }`}
+                      >
+                        {savingId === c.id ? "저장 중..." : cSubmitted ? "✓ 전달 완료" : "저장"}
+                      </button>
+                    </div>
+
+                    {ca?.teacher_answer ? (
+                      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2.5">
+                        <p className="text-[11px] font-black tracking-wide text-amber-700">선생님이 고쳐준 답변</p>
+                        <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                          {ca.teacher_answer}
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {cfb ? <FeedbackAccordion grades={cGrades} text={cfbText} /> : null}
+                  </div>
+                );
+              })}
             </div>
           );
         })}
@@ -968,7 +1153,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
       {/* 대입: 학교 → 학과 → 전형 드롭다운 */}
       {showUnivPicker && (
-        <UnivQuestionPicker value={univPick} onSelect={setUnivPick} />
+        <UnivQuestionPicker studentId={studentId} value={univPick} onSelect={setUnivPick} />
       )}
 
       {canPrint && (

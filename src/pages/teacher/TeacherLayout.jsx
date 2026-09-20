@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { supabase } from "../../lib/supabase";
 import AvailabilityTab from "./AvailabilityTab";
@@ -12,9 +13,33 @@ import TeacherInterviewTab from "./TeacherInterviewTab";
 import TeacherMemosTab from "./TeacherMemosTab";
 import TeacherMyPageTab from "./TeacherMyPageTab";
 
+const MENUS = [
+  { key: "schedule", label: "내 스케줄" },
+  { key: "attendance", label: "출석 체크" },
+  { key: "homework", label: "숙제 피드백" },
+  { key: "interview_group", label: "단체반 수업" },
+  { key: "interview_one", label: "1:1 수업" },
+  { key: "materials", label: "학생 자료함" },
+  { key: "chat", label: "학생 채팅" },
+  { key: "notifications", label: "알림" },
+  { key: "settlement", label: "수업 정산" },
+  { key: "memos", label: "받은 상담 메모" },
+  { key: "mypage", label: "마이페이지" },
+];
+
 export default function TeacherLayout() {
   const { profile, signOut } = useAuth();
-  const [active, setActive] = useState("schedule");
+
+  // 어느 메뉴를 보고 있는지 주소에 남긴다 (?tab=schedule).
+  // 그래야 브라우저 뒤로가기가 로그인 화면이 아니라 이전 메뉴로 간다.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get("tab");
+  const active = MENUS.some((m) => m.key === tabFromUrl) ? tabFromUrl : "schedule";
+  const setActive = (key) => {
+    if (key === active) return;
+    setSearchParams({ tab: key });   // 기록에 쌓여서 뒤로가기가 동작한다
+  };
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [unread, setUnread] = useState(0);
 
@@ -56,20 +81,6 @@ export default function TeacherLayout() {
     await signOut();
     window.location.href = "/home";
   };
-
-  const MENUS = [
-    { key: "schedule", label: "내 스케줄" },
-    { key: "attendance", label: "출석 체크" },
-    { key: "homework", label: "숙제 피드백" },
-    { key: "interview_group", label: "단체반 수업" },
-    { key: "interview_one", label: "1:1 수업" },
-    { key: "materials", label: "학생 자료함" },
-    { key: "chat", label: "학생 채팅" },
-    { key: "notifications", label: "알림" },
-    { key: "settlement", label: "수업 정산" },
-    { key: "memos", label: "받은 상담 메모" },
-    { key: "mypage", label: "마이페이지" },
-  ];
 
   const current = MENUS.find((m) => m.key === active);
 

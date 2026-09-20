@@ -94,6 +94,17 @@ export const CATEGORIES = {
 export const CATEGORY_LIST = Object.values(CATEGORIES);
 
 // ============================================================
+// 학생 화면에서는 감추는 탭
+// mock(면접 모의고사) — 선생님이 출제하는 자리다.
+// 출제하면 학생에게는 '면접 시뮬레이션' 안에 나타난다.
+// ============================================================
+export const STUDENT_HIDDEN_TABS = ["mock"];
+
+export function getStudentTabs(categoryKey) {
+  return getTabs(categoryKey).filter((t) => !STUDENT_HIDDEN_TABS.includes(t.key));
+}
+
+// ============================================================
 // 기출문제 계열 선택(series)
 // interview_questions_v2.series_key 값과 1:1 매칭
 //

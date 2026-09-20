@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import PtReview from "./PtReview";
+import TeacherMockPanel from "./TeacherMockPanel";
 import {
   getCategory,
   getSubLabel,
@@ -24,8 +25,29 @@ const FN_MAP = {
 };
 const FN_FALLBACK = "interview-ai-feedback";
 
-function getFnName(categoryKey) {
-  return FN_MAP[categoryKey] ?? FN_FALLBACK;
+// 한 문항당 연습 회차는 3차까지
+const MAX_ROUND = 3;
+
+// 생기부 영역 구분
+const SOURCE_TYPES = [
+  { key: "창체", label: "창체", cls: "bg-emerald-50 text-emerald-700" },
+  { key: "세특", label: "세특", cls: "bg-blue-50 text-seum-blue" },
+  { key: "행특", label: "행특", cls: "bg-purple-50 text-purple-700" },
+];
+const sourceStyle = (k) => SOURCE_TYPES.find((t) => t.key === k)?.cls ?? "bg-slate-100 text-slate-500";
+
+// 학생마다 다른 질문을 선생님이 직접 만드는 탭
+const PERSONAL_TAB = "saenggibu";
+
+
+// 탭 자체가 성격이 다른 경우는 전용 함수를 쓴다
+const TAB_FN_MAP = {
+  saenggibu: "interview-ai-saenggibu",   // 생기부 — 사실 확인 + 꼬리질문
+  gichul: "interview-ai-gichul",         // 기출 — 학교별 평가요소
+};
+
+function getFnName(categoryKey, tabKey) {
+  return TAB_FN_MAP[tabKey] ?? FN_MAP[categoryKey] ?? FN_FALLBACK;
 }
 
 // Edge Function 에러의 실제 응답 본문을 뽑아냄
@@ -42,6 +64,17 @@ async function extractFnError(error) {
   }
   return detail;
 }
+
+// AI 초안에서 [꼬리질문] 한 줄만 뽑아낸다
+const pickFollowUp = (draft) => {
+  if (!draft) return "";
+  const m = draft.match(/\[\s*꼬리질문\s*\]([\s\S]*?)(?=\n\[|$)/);
+  if (!m) return "";
+  return m[1]
+    .split("\n")
+    .map((x) => x.replace(/^[·\-\d.\s]+/, "").trim())
+    .filter(Boolean)[0] ?? "";
+};
 
 const fmtTime = (iso) => {
   if (!iso) return "";
@@ -192,6 +225,26 @@ export default function TeacherClassInterview({ courseType = "group" }) {
   const [showAllSeries, setShowAllSeries] = useState(false);
 
   const [draftEdits, setDraftEdits] = useState({}); // { [answerId]: text }
+  const [answerEdits, setAnswerEdits] = useState({}); // { [answerId]: 학생 답변 수정본 }
+  const [openMap, setOpenMap] = useState({}); // { [questionId]: true|false } — 직접 누른 것만 기록
+  const [aiOpen, setAiOpen] = useState({});   // { [answerId]: true } — AI 분석 박스 펼침
+  const [univProfiles, setUnivProfiles] = useState({}); // { [univ]: 평가요소 }
+  const [univPicks, setUnivPicks] = useState([]);       // 학생이 고른 지원 6개
+  const [univPick, setUnivPick] = useState(null);       // 지금 보고 있는 지원
+  const [roundsMap, setRoundsMap] = useState({}); // { [questionId]: [회차...] 오름차순 }
+  const [pastOpen, setPastOpen] = useState({});   // { [questionId]: true } — 지난 회차 펼침
+
+  // 생기부 질문 — 한 줄 입력으로 계속 추가
+  const [newQType, setNewQType] = useState("세특");
+  // 수정은 팝업
+  const [qModal, setQModal] = useState(null);     // null | { mode: "new"|"edit", row }
+  const [qText, setQText] = useState("");   // 수정용
+  const [qType, setQType] = useState("세특"); // 수정용
+  const [qList, setQList] = useState([]);     // 추가용 [{type, text}]
+  const [qSaving, setQSaving] = useState(false);
+  const [sendingQ, setSendingQ] = useState(false);
+  const [followEdits, setFollowEdits] = useState({});  // { [questionId]: 꼬리질문 }
+  const [followSaving, setFollowSaving] = useState(null);
   const [savingId, setSavingId] = useState(null);
   const [aiLoadingId, setAiLoadingId] = useState(null);
 
@@ -304,6 +357,29 @@ export default function TeacherClassInterview({ courseType = "group" }) {
     return () => { alive = false; };
   }, [selStudent]);
 
+  // 학생이 고른 지원 목록 (대입 기출용)
+  useEffect(() => {
+    if (!selStudent || selClass?.assignment?.category_key !== "univ") {
+      setUnivPicks([]);
+      setUnivPick(null);
+      return;
+    }
+    let alive = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from("student_univ_picks")
+        .select("*")
+        .eq("student_id", selStudent.id)
+        .order("created_at");
+      if (!alive) return;
+      if (error) console.error("지원 목록 조회 실패:", error);
+      const list = data ?? [];
+      setUnivPicks(list);
+      setUnivPick(list[0] ?? null);
+    })();
+    return () => { alive = false; };
+  }, [selStudent, selClass]);
+
   // 컨셉 저장 — 학생 화면에도 바로 보인다
   const saveConcept = async () => {
     if (!selStudent || !selClass) return;
@@ -414,19 +490,112 @@ export default function TeacherClassInterview({ courseType = "group" }) {
     try {
       const { category_key, sub_key } = selClass.assignment;
 
-      let q = supabase
-        .from("interview_questions_v2")
-        .select("*")
-        .eq("category_key", category_key)
-        .eq("tab_key", activeTab)
-        .eq("is_active", true)
-        .order("seq", { ascending: true });
+      let qs, qErr;
 
-      if (!isSharedContent(category_key, activeTab)) {
-        q = sub_key ? q.eq("sub_key", sub_key) : q.is("sub_key", null);
+      // 대입 기출은 univ_questions 에 있다.
+      // 학생이 고른 지원(학교·학과·전형) 기준으로 문항 전체를 보여준다.
+      if (category_key === "univ" && activeTab === "gichul") {
+        if (!univPick) {
+          setRows([]);
+          setDraftEdits({});
+          setRoundsMap({});
+          setLoading(false);
+          return;
+        }
+
+        const { data: uq, error: qErr2 } = await supabase
+          .from("univ_questions")
+          .select("*")
+          .eq("univ", univPick.univ)
+          .eq("major", univPick.major)
+          .eq("admission", univPick.admission)
+          .eq("is_active", true)
+          .order("seq", { ascending: true });
+        if (qErr2) throw qErr2;
+
+        const list = uq ?? [];
+        const idSet2 = new Set(list.map((q) => q.id));
+
+        const { data: ans, error: aErr } = await supabase
+          .from("interview_answers_v2")
+          .select("*")
+          .eq("student_id", selStudent.id);
+        if (aErr) throw aErr;
+
+        const aMap = {};
+        const edits2 = {};
+        (ans ?? []).forEach((a) => {
+          if (!idSet2.has(a.question_id)) return;
+          aMap[a.question_id] = a;
+          edits2[a.id] = a.teacher_feedback ?? "";
+        });
+
+        // 구조 붙이기
+        const codes = Array.from(new Set(list.map((q) => q.type_code).filter(Boolean)));
+        const sMap = {};
+        if (codes.length > 0) {
+          const { data: st } = await supabase
+            .from("interview_structures").select("*").in("id", codes);
+          (st ?? []).forEach((x) => { sMap[x.id] = x; });
+        }
+
+        // 학교 평가요소
+        const { data: pf } = await supabase
+          .from("univ_profiles").select("*").eq("univ", univPick.univ);
+        setUnivProfiles(pf && pf[0] ? { [univPick.univ]: pf[0] } : {});
+
+        // 회차
+        const rMap = {};
+        const { data: rds } = await supabase
+          .from("interview_rounds")
+          .select("*")
+          .eq("student_id", selStudent.id)
+          .order("round", { ascending: true });
+        (rds ?? []).forEach((r) => {
+          if (!idSet2.has(r.question_id)) return;
+          (rMap[r.question_id] = rMap[r.question_id] || []).push(r);
+        });
+        setRoundsMap(rMap);
+
+        setRows(list.map((q) => ({
+          ...q,
+          structure_name: sMap[q.type_code]?.name ?? null,
+          speech_structure: sMap[q.type_code]?.speech_structure ?? null,
+          _answer: aMap[q.id] ?? null,
+        })));
+        setDraftEdits(edits2);
+        setStudentSeries([]);
+        setGichulView(null);
+        setShowAllSeries(false);
+        setLoading(false);
+        return;
       }
 
-      const { data: qs, error: qErr } = await q;
+      if (activeTab === PERSONAL_TAB) {
+        // 생기부는 학생마다 질문이 다르다. 선생님이 만든 것만 보여준다.
+        const res = await supabase
+          .from("student_questions")
+          .select("*")
+          .eq("student_id", selStudent.id)
+          .eq("tab_key", PERSONAL_TAB)
+          .eq("is_active", true)
+          .order("seq", { ascending: true });
+        qs = res.data; qErr = res.error;
+      } else {
+        let q = supabase
+          .from("interview_questions_v2")
+          .select("*")
+          .eq("category_key", category_key)
+          .eq("tab_key", activeTab)
+          .eq("is_active", true)
+          .order("seq", { ascending: true });
+
+        if (!isSharedContent(category_key, activeTab)) {
+          q = sub_key ? q.eq("sub_key", sub_key) : q.is("sub_key", null);
+        }
+        const res = await q;
+        qs = res.data; qErr = res.error;
+      }
 
       if (qErr) throw qErr;
 
@@ -446,16 +615,32 @@ export default function TeacherClassInterview({ courseType = "group" }) {
         (ans ?? []).forEach((answer) => {
           if (!idSet.has(answer.question_id)) return;
           ansMap[answer.question_id] = answer;
-          edits[answer.id] = answer.teacher_feedback ?? answer.ai_draft ?? "";
+          edits[answer.id] = answer.teacher_feedback ?? "";   // AI 초안은 넣지 않는다
         });
       }
+
+      // 회차 기록 — 학생 전체를 가져와 이 탭 문항만 추린다
+      const rMap = {};
+      if (idSet.size > 0) {
+        const { data: rds } = await supabase
+          .from("interview_rounds")
+          .select("*")
+          .eq("student_id", selStudent.id)
+          .order("round", { ascending: true });
+        (rds ?? []).forEach((r) => {
+          if (!idSet.has(r.question_id)) return;
+          (rMap[r.question_id] = rMap[r.question_id] || []).push(r);
+        });
+      }
+      setRoundsMap(rMap);
 
       let merged = questionList.map((question) => ({
         ...question,
         _answer: ansMap[question.id] ?? null,
       }));
 
-      if (isSharedContent(category_key, activeTab)) merged = dedupeByQuestion(merged);
+      if (activeTab !== PERSONAL_TAB && isSharedContent(category_key, activeTab))
+        merged = dedupeByQuestion(merged);
 
       if (activeTab === "gichul") {
         const detected = Array.from(
@@ -491,11 +676,15 @@ export default function TeacherClassInterview({ courseType = "group" }) {
   };
 
   useEffect(() => { loadTab(); /* eslint-disable-next-line */ },
-    [selClass, selStudent, activeTab]);
+    [selClass, selStudent, activeTab, univPick]);
 
   // ── 화면에 보일 목록 계산 ─────────────────────────────
-  const isGichul = activeTab === "gichul";
+  const isGichul = activeTab === "gichul" && selClass?.assignment?.category_key !== "univ";
+  const isUnivGichul = activeTab === "gichul" && selClass?.assignment?.category_key === "univ";
   const isPt = activeTab === "pt";
+  const isPersonal = activeTab === PERSONAL_TAB;
+  const isMock = activeTab === "mock";
+  const unsentCount = isPersonal ? rows.filter((r) => !r.sent_at).length : 0;
   const isUniv = selClass?.assignment?.category_key === "univ";
 
   const seriesLabelMap = rows.reduce((acc, row) => {
@@ -538,7 +727,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
   const genOne = async (qRow, answerRow) => {
     if (!answerRow?.student_answer) return null;
     const { category_key, sub_key } = selClass.assignment;
-    const fnName = getFnName(category_key);
+    const fnName = getFnName(category_key, activeTab);
     const { data, error } = await supabase.functions.invoke(fnName, {
       body: {
         category: getCategoryLabel(category_key),
@@ -554,6 +743,11 @@ export default function TeacherClassInterview({ courseType = "group" }) {
         concept: savedConcept || null,
         speech_structure: qRow.speech_structure ?? null,
         structure_name: qRow.structure_name ?? null,
+        // 기출 피드백용 — 지원 학교·학과·전형과 그 학교의 평가요소
+        univ: qRow.univ ?? null,
+        major: qRow.major ?? null,
+        admission: qRow.admission ?? null,
+        profile: qRow.univ ? (univProfiles[qRow.univ] ?? null) : null,
       },
     });
 
@@ -583,7 +777,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
       setRows((prev) =>
         prev.map((r) => (r.id === qRow.id ? { ...r, _answer: { ...r._answer, ai_draft: draft } } : r))
       );
-      setDraftEdits((prev) => ({ ...prev, [a.id]: draft }));
+      setAiOpen((p) => ({ ...p, [a.id]: true }));   // 생성되면 펼쳐서 보여준다
     } catch (e) {
       alert("AI 오류:\n\n" + e.message);
     } finally {
@@ -616,7 +810,6 @@ export default function TeacherClassInterview({ courseType = "group" }) {
         setRows((prev) =>
           prev.map((r) => (r.id === qRow.id ? { ...r, _answer: { ...r._answer, ai_draft: draft } } : r))
         );
-        setDraftEdits((prev) => ({ ...prev, [a.id]: draft }));
       } catch (e) {
         console.error("AI 실패:", e.message);
         failCount++;
@@ -633,27 +826,266 @@ export default function TeacherClassInterview({ courseType = "group" }) {
     }
   };
 
-  // 피드백 확정 1건
-  const confirmOne = async (qRow) => {
+  // 기본은 "답변이 있고 아직 확정 안 된 문항"만 펼친다.
+  // 선생님이 직접 누르면 그 선택을 따른다.
+  const isOpen = (qRow, a, hasAnswer) => {
+    if (openMap[qRow.id] !== undefined) return openMap[qRow.id];
+    if (hasAnswer) return !a?.teacher_feedback;
+    return activeTab === PERSONAL_TAB;   // 생기부는 답변 전에도 펼쳐 둔다
+  };
+  const toggleOpen = (qid, cur) => {
+    setOpenMap((p) => ({ ...p, [qid]: !cur }));
+  };
+
+  // ── 생기부 질문 ──────────────────────────────────────
+  const openNewQuestion = () => {
+    setQModal({ mode: "new", row: null });
+    setQList([{ type: newQType, text: "" }]);
+  };
+
+  const addQRow = () => {
+    setQList((p) => [...p, { type: p[p.length - 1]?.type ?? "세특", text: "" }]);
+  };
+  const setQRow = (idx, patch) => {
+    setQList((p) => p.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  };
+  const removeQRow = (idx) => {
+    setQList((p) => (p.length <= 1 ? p : p.filter((_, i) => i !== idx)));
+  };
+
+  const openEditQuestion = (row) => {
+    setQModal({ mode: "edit", row });
+    setQText(row.question ?? "");
+    setQType(row.source_type ?? "세특");
+  };
+
+  // 추가는 여러 줄을 한 번에, 수정은 한 건만
+  const saveQuestion = async () => {
+    setQSaving(true);
+
+    if (qModal.mode === "edit") {
+      const text = qText.trim();
+      if (!text) { setQSaving(false); return alert("질문을 입력하세요."); }
+      const { error } = await supabase
+        .from("student_questions")
+        .update({ question: text, source_type: qType, updated_at: new Date().toISOString() })
+        .eq("id", qModal.row.id);
+      setQSaving(false);
+      if (error) return alert("저장 실패: " + error.message);
+      setQModal(null);
+      loadTab();
+      return;
+    }
+
+    const targets = qList.filter((r) => r.text.trim());
+    if (targets.length === 0) { setQSaving(false); return alert("질문을 입력하세요."); }
+
+    const baseSeq = rows.length > 0 ? Math.max(...rows.map((r) => r.seq ?? 0)) : 0;
+    const payload = targets.map((r, i) => ({
+      student_id: selStudent.id,
+      tab_key: PERSONAL_TAB,
+      seq: baseSeq + i + 1,
+      question: r.text.trim(),
+      source_type: r.type,
+      created_by: myId,
+    }));
+
+    const { error } = await supabase.from("student_questions").insert(payload);
+    setQSaving(false);
+    if (error) return alert("저장 실패: " + error.message);
+
+    setNewQType(targets[targets.length - 1].type);
+    setQModal(null);
+    loadTab();
+  };
+
+  // 아직 학생에게 안 보낸 질문을 한 번에 보낸다
+  const sendQuestions = async () => {
+    const targets = rows.filter((r) => !r.sent_at);
+    if (targets.length === 0) return;
+    if (!window.confirm(`${targets.length}개 질문을 ${selStudent.name} 학생에게 보낼까요?`)) return;
+
+    setSendingQ(true);
+    const { error } = await supabase
+      .from("student_questions")
+      .update({ sent_at: new Date().toISOString() })
+      .in("id", targets.map((r) => r.id));
+    setSendingQ(false);
+    if (error) return alert("보내기 실패: " + error.message);
+    loadTab();
+  };
+
+  // AI로 꼬리질문만 새로 뽑는다 (최종 답변 기준)
+  const genFollowUp = async (qRow) => {
     const a = qRow._answer;
-    if (!a) return;
-    const text = (draftEdits[a.id] ?? "").trim();
-    if (!text) return alert("피드백 내용을 입력하세요.");
+    const answerText = (a?.teacher_answer ?? a?.student_answer ?? "").trim();
+    if (!answerText) return alert("학생 답변이 없습니다.");
+
+    setFollowSaving(qRow.id + ":gen");
+    try {
+      const { category_key, sub_key } = selClass.assignment;
+      const fnName = getFnName(category_key, activeTab);
+      const { data, error } = await supabase.functions.invoke(fnName, {
+        body: {
+          category: getCategoryLabel(category_key),
+          category_key,
+          sub: getSubLabel(category_key, sub_key),
+          sub_key,
+          tab: getTabLabel(category_key, activeTab),
+          tab_key: activeTab,
+          question: qRow.question,
+          answer: answerText,
+          concept: savedConcept || null,
+        },
+      });
+      if (error) throw new Error(await extractFnError(error));
+      if (!data?.success) throw new Error(data?.error || "AI 실패");
+
+      const q = pickFollowUp(data.feedback || "");
+      if (!q) throw new Error("꼬리질문을 찾지 못했습니다. 다시 시도해주세요.");
+      setFollowEdits((p) => ({ ...p, [qRow.id]: q }));
+    } catch (e) {
+      alert("꼬리질문 생성 실패:\n\n" + e.message);
+    } finally {
+      setFollowSaving(null);
+    }
+  };
+
+  // 꼬리질문을 새 질문으로 만들어 학생에게 바로 보낸다
+  const sendFollowUp = async (qRow) => {
+    const text = (followEdits[qRow.id] ?? "").trim();
+    if (!text) return alert("꼬리질문을 입력하세요.");
+
+    setFollowSaving(qRow.id);
+    const nextSeq = rows.length > 0 ? Math.max(...rows.map((r) => r.seq ?? 0)) + 1 : 1;
+    const { error } = await supabase.from("student_questions").insert({
+      student_id: selStudent.id,
+      tab_key: PERSONAL_TAB,
+      seq: nextSeq,
+      question: text,
+      source_type: qRow.source_type ?? null,
+      parent_id: qRow.id,
+      created_by: myId,
+      sent_at: new Date().toISOString(),   // 꼬리질문은 바로 보낸다
+    });
+    setFollowSaving(null);
+    if (error) return alert("꼬리질문 보내기 실패: " + error.message);
+
+    setFollowEdits((p) => {
+      const next = { ...p };
+      delete next[qRow.id];
+      return next;
+    });
+    loadTab();
+  };
+
+  const removeQuestion = async (row) => {
+    if (!window.confirm("이 질문을 지울까요? 학생 화면에서도 사라집니다.")) return;
+    const { error } = await supabase
+      .from("student_questions")
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq("id", row.id);
+    if (error) return alert("삭제 실패: " + error.message);
+    loadTab();
+  };
+
+  // 저장 — 고친 답변과 피드백을 함께 학생에게 보낸다
+  // AI 초안(ai_draft)은 여기에 포함되지 않는다. 학생은 절대 볼 수 없다.
+  const sendToStudent = async (qRow) => {
+    let a = qRow._answer;
+
+    // 학생이 아직 답변하지 않았으면 빈 답변 행을 먼저 만든다
+    if (!a) {
+      const { data: created, error: cErr } = await supabase
+        .from("interview_answers_v2")
+        .insert({ question_id: qRow.id, student_id: selStudent.id })
+        .select()
+        .maybeSingle();
+      if (cErr) return alert("저장 실패: " + cErr.message);
+      a = created;
+      setRows((prev) =>
+        prev.map((r) => (r.id === qRow.id ? { ...r, _answer: created } : r))
+      );
+    }
+
+    const fb = (draftEdits[qRow._answer?.id ?? qRow.id] ?? draftEdits[a.id] ?? "").trim();
+    const base = (a.teacher_answer ?? a.student_answer ?? "").trim();
+    const ans = (answerEdits[qRow._answer?.id ?? qRow.id] ?? answerEdits[a.id] ?? base).trim();
+    const ansChanged = ans !== base;
+
+    if (!fb && !ansChanged) return alert("피드백을 작성하거나 답변을 고쳐주세요.");
+
     setSavingId(a.id);
     const now = new Date().toISOString();
+
+    // 학생이 쓴 student_answer 는 그대로 두고, 첨삭본만 teacher_answer 에 넣는다
+    const payload = { updated_at: now };
+    if (ansChanged) payload.teacher_answer = ans;
+    if (fb) {
+      payload.teacher_feedback = fb;
+      payload.feedback_at = now;
+    }
+
     const { data, error } = await supabase
       .from("interview_answers_v2")
-      .update({ teacher_feedback: text, feedback_at: now, updated_at: now })
+      .update(payload)
       .eq("id", a.id)
       .select()
       .maybeSingle();
-    setSavingId(null);
-    if (error) return alert("저장 실패: " + error.message);
+    if (error) { setSavingId(null); return alert("저장 실패: " + error.message); }
 
-    const wasNew = !a.teacher_feedback;
+    // 회차에도 기록한다 (학생 화면의 지난 기록이 이걸 본다)
+    try {
+      const rounds = roundsMap[qRow.id] ?? [];
+      const last = rounds[rounds.length - 1] ?? null;
+      const rPayload = {};
+      if (ansChanged) rPayload.teacher_answer = ans;
+      if (fb) { rPayload.teacher_feedback = fb; rPayload.feedback_at = now; }
+      if (a.ai_draft) rPayload.ai_draft = a.ai_draft;
+
+      if (last) {
+        const { data: rd } = await supabase
+          .from("interview_rounds")
+          .update(rPayload)
+          .eq("id", last.id)
+          .select()
+          .maybeSingle();
+        if (rd) {
+          setRoundsMap((prev) => ({
+            ...prev,
+            [qRow.id]: (prev[qRow.id] ?? []).map((x) => (x.id === rd.id ? rd : x)),
+          }));
+        }
+      } else {
+        const { data: rd } = await supabase
+          .from("interview_rounds")
+          .insert({
+            question_id: qRow.id,
+            student_id: selStudent.id,
+            round: 1,
+            student_answer: a.student_answer,
+            answered_at: a.answered_at,
+            ...rPayload,
+          })
+          .select()
+          .maybeSingle();
+        if (rd) setRoundsMap((prev) => ({ ...prev, [qRow.id]: [rd] }));
+      }
+    } catch (e) {
+      console.error("회차 기록 실패:", e.message);
+    }
+
+    setSavingId(null);
+
+    const wasNew = !a.teacher_feedback && !!fb;
     setRows((prev) =>
       prev.map((r) => (r.id === qRow.id ? { ...r, _answer: { ...r._answer, ...data } } : r))
     );
+    setAnswerEdits((p) => {
+      const next = { ...p };
+      delete next[a.id];
+      return next;
+    });
     if (wasNew) {
       setTabStats((prev) => {
         const cur = prev[activeTab] || { answered: 0, feedbacked: 0 };
@@ -799,6 +1231,50 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                 })}
               </div>
 
+              {/* 대입 기출 — 학생이 고른 지원 목록 */}
+              {isUnivGichul && (
+                <div className="mb-4 rounded-xl bg-slate-50 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-xs font-medium text-slate-500">
+                      {univPicks.length > 0
+                        ? `${selStudent.name} 학생이 고른 지원 학교`
+                        : "이 학생은 아직 지원 학교를 고르지 않았습니다"}
+                    </p>
+                    <span className="shrink-0 text-xs font-bold text-slate-400">
+                      {univPicks.length} / 6
+                    </span>
+                  </div>
+
+                  {univPicks.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-slate-300 bg-white py-4 text-center text-xs text-slate-400">
+                      학생이 기출문제 탭에서 학교·학과·전형을 고르면 여기에 표시됩니다.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {univPicks.map((p) => {
+                        const on =
+                          univPick?.univ === p.univ &&
+                          univPick?.major === p.major &&
+                          univPick?.admission === p.admission;
+                        return (
+                          <button key={p.id} type="button" onClick={() => setUnivPick(p)}
+                            className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
+                              on
+                                ? "bg-seum-blue text-white"
+                                : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100"
+                            }`}>
+                            {p.univ} · {p.major}
+                            <span className={`ml-1.5 ${on ? "text-blue-100" : "text-slate-400"}`}>
+                              {p.admission}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* 기출 탭 — 직렬 */}
               {isGichul && !loading && rows.length > 0 && (
                 <div className="mb-4 rounded-xl bg-slate-50 p-3">
@@ -830,7 +1306,13 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                 </div>
               )}
 
-              {isPt ? (
+              {isMock ? (
+                <TeacherMockPanel
+                  student={selStudent}
+                  teacherId={myId}
+                  concept={savedConcept}
+                />
+              ) : isPt ? (
                 <PtReview
                   studentId={selStudent.id}
                   studentName={selStudent.name}
@@ -849,10 +1331,24 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                     {pendingCount > 0 && ` · 미확정 ${pendingCount}건`}
                   </span>
                 </div>
-                <button type="button" onClick={genAllForStudent} disabled={bulkRunning || loading || pendingCount === 0}
-                  className="rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-50">
-                  {bulkRunning ? `생성 중... (${bulkProgress.done}/${bulkProgress.total})` : "✨ 이 탭 전체 AI 초안"}
-                </button>
+                <div className="flex items-center gap-2">
+                  {isPersonal && unsentCount > 0 && (
+                    <button type="button" onClick={sendQuestions} disabled={sendingQ}
+                      className="rounded-lg bg-seum-navy px-4 py-2 text-sm font-bold text-white hover:bg-[#0d2647] disabled:opacity-50">
+                      {sendingQ ? "보내는 중..." : `저장 및 보내기 (${unsentCount})`}
+                    </button>
+                  )}
+                  {isPersonal && (
+                    <button type="button" onClick={openNewQuestion}
+                      className="rounded-lg border border-seum-navy px-4 py-2 text-sm font-bold text-seum-navy hover:bg-slate-50">
+                      + 질문 추가
+                    </button>
+                  )}
+                  <button type="button" onClick={genAllForStudent} disabled={bulkRunning || loading || pendingCount === 0}
+                    className="rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-50">
+                    {bulkRunning ? `생성 중... (${bulkProgress.done}/${bulkProgress.total})` : "✨ 이 탭 전체 AI 초안"}
+                  </button>
+                </div>
               </div>
 
               {/* 진행 바 */}
@@ -871,6 +1367,13 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                     ? rows.length > 0
                       ? "위에서 직렬을 선택하세요."
                       : "이 탭에 등록된 기출문제가 없습니다."
+                    : isUnivGichul
+                    ? univPicks.length === 0
+                      ? `${selStudent.name} 학생이 아직 지원 학교를 고르지 않았습니다.`
+                      : "위에서 지원 학교를 선택하세요."
+
+                    : isPersonal
+                    ? `${selStudent.name} 학생의 생기부 질문이 아직 없습니다. 위 [+ 질문 추가]로 만들어주세요.`
                     : "이 탭에 등록된 질문이 없습니다."}
                 </p>
               ) : (
@@ -878,24 +1381,63 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                   {visibleRows.map((qRow, i) => {
                     const a = qRow._answer;
                     const hasAnswer = !!a?.student_answer?.trim();
+                    const open = isOpen(qRow, a, hasAnswer);
 
                     const confirmed =
                       !!a?.teacher_feedback &&
-                      (draftEdits[a.id] ?? "").trim() === a.teacher_feedback.trim();
+                      (draftEdits[a?.id] ?? "").trim() === a.teacher_feedback.trim();
+
+                    const rounds = roundsMap[qRow.id] ?? [];
+                    const curRound = rounds.length > 0 ? rounds[rounds.length - 1].round : (hasAnswer ? 1 : 0);
+                    const pastRounds = rounds.slice(0, -1);
+
+                    // 답변 행이 아직 없으면 질문 id 를 키로 쓴다 (저장할 때 행이 생긴다)
+                    const aKey = a?.id ?? qRow.id;
+                    const hasFollowUp = rows.some((r) => r.parent_id === qRow.id);
+                    const ansBase = a?.teacher_answer ?? a?.student_answer ?? "";
+                    const ansText = answerEdits[aKey] ?? ansBase;
+                    const ansDirty = ansText.trim() !== ansBase.trim();
 
                     return (
                       <div
                         key={qRow.id}
-                        className={`rounded-xl border bg-white p-4 transition ${
+                        className={`rounded-xl border bg-white transition ${
                           confirmed ? "border-slate-300" : "border-slate-200"
                         }`}
                       >
-                        <div className="mb-2 flex items-start justify-between gap-3">
+                        {/* 머리 — 누르면 접었다 펼친다 */}
+                        <button
+                          type="button"
+                          onClick={() => toggleOpen(qRow.id, open)}
+                          className="flex w-full items-start justify-between gap-3 p-4 text-left hover:bg-slate-50"
+                        >
                           <p className="font-medium text-seum-navy">
                             <span className="mr-1 text-slate-400">{i + 1}.</span>
+                            {qRow.source_type && (
+                              <span className={`mr-1.5 inline-block rounded px-1.5 py-0.5 align-middle text-[10px] font-bold ${sourceStyle(qRow.source_type)}`}>
+                                {qRow.source_type}
+                              </span>
+                            )}
+                            {isPersonal && qRow.parent_id && (
+                              <span className="mr-1.5 inline-block rounded bg-emerald-100 px-1.5 py-0.5 align-middle text-[10px] font-bold text-emerald-700">
+                                꼬리질문
+                              </span>
+                            )}
+                            {isPersonal && !qRow.sent_at && (
+                              <span className="mr-1.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 align-middle text-[10px] font-bold text-amber-700">
+                                미전송
+                              </span>
+                            )}
                             {qRow.question}
                           </p>
-                          <span className="shrink-0 pt-0.5">
+                          <span className="flex shrink-0 items-center gap-2 pt-0.5">
+                            {curRound > 0 && (
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
+                                curRound >= MAX_ROUND ? "bg-slate-200 text-slate-600" : "bg-blue-50 text-seum-blue"
+                              }`}>
+                                {curRound}차
+                              </span>
+                            )}
                             {confirmed ? (
                               <span className="text-xs text-green-600">
                                 ✓ 전달됨 {a.feedback_at && <span className="text-slate-400">{fmtTime(a.feedback_at)}</span>}
@@ -909,66 +1451,248 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                             ) : (
                               <span className="text-xs text-slate-300">미답변</span>
                             )}
+                            <svg
+                              className={`h-4 w-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+                              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
                           </span>
-                        </div>
+                        </button>
 
-                        {/* 이 질문의 스피치 구조 */}
-                        {qRow.speech_structure && (
-                          <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-2">
-                            <p className="text-[11px] font-bold text-seum-blue">
-                              스피치 구조{qRow.structure_name ? ` · ${qRow.structure_name}` : ""}
-                            </p>
-                            <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
-                              {qRow.speech_structure}
-                            </p>
+                        {/* 생기부 질문은 선생님이 고치고 지울 수 있다 */}
+                        {isPersonal && (
+                          <div className="flex justify-end gap-1.5 border-t border-slate-100 px-4 py-2">
+                            <button type="button" onClick={() => openEditQuestion(qRow)}
+                              className="rounded-md border border-slate-300 px-2.5 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                              질문 수정
+                            </button>
+                            <button type="button" onClick={() => removeQuestion(qRow)}
+                              className="rounded-md border border-red-200 px-2.5 py-0.5 text-xs font-medium text-red-500 hover:bg-red-50">
+                              삭제
+                            </button>
                           </div>
                         )}
 
-                        {hasAnswer ? (
-                          <>
-                            <div className="mb-3 rounded-lg bg-slate-50 px-3 py-2.5">
-                              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">학생 답변</p>
-                              <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{a.student_answer}</p>
+                        {open && (
+                          <div className="border-t border-slate-100 p-4">
+                            {/* 이 질문의 스피치 구조 */}
+                            {!isPersonal && qRow.speech_structure && (
+                              <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-2">
+                                <p className="text-[11px] font-bold text-seum-blue">
+                                  스피치 구조{qRow.structure_name ? ` · ${qRow.structure_name}` : ""}
+                                </p>
+                                <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
+                                  {qRow.speech_structure}
+                                </p>
+                              </div>
+                            )}
+
+                            {/* 학생이 쓴 원본 — 건드리지 않는다 */}
+                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                              학생 답변
+                            </p>
+                            {hasAnswer ? (
+                              <p className="mb-4 whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2.5 text-sm leading-relaxed text-slate-700">
+                                {a.student_answer}
+                              </p>
+                            ) : (
+                              <p className="mb-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-400">
+                                아직 답변하지 않았습니다.
+                              </p>
+                            )}
+
+                            {/* 첨삭 답변 */}
+                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-600">
+                              첨삭 답변
+                              {a?.teacher_answer && (
+                                <span className="ml-1.5 font-normal normal-case tracking-normal text-slate-400">
+                                  학생에게 전달됨
+                                </span>
+                              )}
+                            </p>
+                            <textarea
+                              value={ansText}
+                              onChange={(e) =>
+                                setAnswerEdits((p) => ({ ...p, [aKey]: e.target.value }))
+                              }
+                              rows={6}
+                              placeholder="답변을 고쳐 쓰면 학생 화면에 첨삭본으로 보입니다."
+                              className={`mb-4 w-full rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none focus:border-seum-blue ${
+                                ansDirty ? "border-amber-400 bg-amber-50/40" : "border-slate-200 bg-white"
+                              }`}
+                            />
+
+                            {/* AI 분석 — 선생님만 본다 */}
+                            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50">
+                              <div className="flex items-center justify-between px-3 py-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setAiOpen((p) => ({ ...p, [aKey]: !p[aKey] }))}
+                                  disabled={!a?.ai_draft}
+                                  className="flex items-center gap-1.5 text-left disabled:cursor-default"
+                                >
+                                  <span className="text-[11px] font-black tracking-wide text-slate-500">AI 분석</span>
+                                  <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
+                                    선생님만 봄
+                                  </span>
+                                  {a?.ai_draft && (
+                                    <svg
+                                      className={`h-3.5 w-3.5 text-slate-400 transition-transform ${aiOpen[aKey] ? "rotate-180" : ""}`}
+                                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"
+                                    >
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                  )}
+                                </button>
+                                <button type="button" onClick={() => genSingle(qRow)}
+                                  disabled={!hasAnswer || aiLoadingId === a?.id || bulkRunning}
+                                  className="shrink-0 rounded-md border border-seum-blue px-2.5 py-0.5 text-xs font-bold text-seum-blue hover:bg-blue-50 disabled:opacity-40">
+                                  {aiLoadingId === a?.id ? "분석 중..." : a?.ai_draft ? "🔄 다시" : "✨ AI 분석"}
+                                </button>
+                              </div>
+
+                              {a?.ai_draft ? (
+                                aiOpen[aKey] && (
+                                  <p className="whitespace-pre-wrap border-t border-slate-200 px-3 py-2.5 text-sm leading-relaxed text-slate-600">
+                                    {a.ai_draft}
+                                  </p>
+                                )
+                              ) : (
+                                <p className="border-t border-slate-200 px-3 py-2.5 text-xs text-slate-400">
+                                  {hasAnswer
+                                    ? "아직 분석하지 않았습니다. 컨셉·활동 매칭·스피치 구조를 확인하려면 AI 분석을 누르세요."
+                                    : "학생이 답변하면 AI 분석을 쓸 수 있습니다."}
+                                </p>
+                              )}
                             </div>
 
-                            <div className="mb-1.5 flex items-center justify-between">
-                              <span className="text-[11px] font-semibold uppercase tracking-wide text-seum-blue">피드백</span>
-                              <button type="button" onClick={() => genSingle(qRow)} disabled={aiLoadingId === a.id || bulkRunning}
-                                className="rounded-md border border-seum-blue px-2.5 py-0.5 text-xs font-bold text-seum-blue hover:bg-blue-50 disabled:opacity-50">
-                                {aiLoadingId === a.id ? "생성 중..." : a.ai_draft ? "🔄 다시" : "✨ AI"}
-                              </button>
-                            </div>
-                            <textarea value={draftEdits[a.id] ?? ""} onChange={(e) => setDraftEdits((p) => ({ ...p, [a.id]: e.target.value }))}
-                              rows={5}
-                              placeholder="AI 초안 생성 또는 직접 작성"
-                              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue" />
-                            <div className="mt-2 flex justify-end">
+                            {/* 꼬리질문 — 생기부만. 최종 답변을 보고 만든다 */}
+                            {isPersonal && hasAnswer && (
+                              <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+                                <div className="mb-2 flex items-center justify-between">
+                                  <p className="text-[11px] font-black tracking-wide text-emerald-700">
+                                    꼬리질문
+                                    {hasFollowUp && (
+                                      <span className="ml-1.5 font-normal text-slate-400">이미 보냈습니다</span>
+                                    )}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => genFollowUp(qRow)}
+                                    disabled={followSaving === qRow.id + ":gen"}
+                                    className="rounded-md border border-emerald-600 px-2.5 py-0.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                                  >
+                                    {followSaving === qRow.id + ":gen" ? "생성 중..." : "✨ 꼬리질문 생성"}
+                                  </button>
+                                </div>
+
+                                <div className="flex gap-2">
+                                  <input
+                                    value={followEdits[qRow.id] ?? ""}
+                                    onChange={(e) =>
+                                      setFollowEdits((p) => ({ ...p, [qRow.id]: e.target.value }))
+                                    }
+                                    placeholder="생성 버튼을 누르면 채워집니다. 직접 써도 됩니다."
+                                    className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => sendFollowUp(qRow)}
+                                    disabled={followSaving === qRow.id || !(followEdits[qRow.id] ?? "").trim()}
+                                    className="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-40"
+                                  >
+                                    {followSaving === qRow.id ? "보내는 중..." : "보내기"}
+                                  </button>
+                                </div>
+                                <p className="mt-1.5 text-[11px] text-slate-500">
+                                  첨삭이 끝난 최종 답변을 기준으로 만듭니다. 보내면 학생 화면의 이 질문 아래에 붙습니다.
+                                </p>
+                              </div>
+                            )}
+
+                            {/* 학생에게 보낼 피드백 */}
+                            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-seum-blue">
+                              학생에게 보낼 피드백
+                            </p>
+                            <textarea value={draftEdits[aKey] ?? ""} onChange={(e) => setDraftEdits((p) => ({ ...p, [aKey]: e.target.value }))}
+                              rows={6}
+                              placeholder="AI 분석을 참고해 학생에게 전할 말을 직접 작성하세요."
+                              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm leading-relaxed outline-none focus:border-seum-blue" />
+
+                            <div className="mt-2 flex items-center justify-between gap-3">
+                              <span className="text-[11px] text-slate-400">
+                                {ansDirty
+                                  ? "첨삭 답변과 피드백이 함께 전달됩니다. 학생이 쓴 원본은 그대로 남습니다."
+                                  : "저장하면 학생 화면에 바로 보입니다."}
+                              </span>
                               <button
                                 type="button"
-                                onClick={() => confirmOne(qRow)}
-                                disabled={savingId === a.id || confirmed}
-                                className={`rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
-                                  confirmed
+                                onClick={() => sendToStudent(qRow)}
+                                disabled={savingId === aKey || (confirmed && !ansDirty)}
+                                className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
+                                  confirmed && !ansDirty
                                     ? "cursor-default bg-slate-700"
                                     : "bg-seum-blue hover:bg-[#2a63c4]"
                                 }`}
                               >
-                                {savingId === a.id
+                                {savingId === aKey
                                   ? "저장 중..."
-                                  : confirmed
+                                  : confirmed && !ansDirty
                                   ? "✓ 전달 완료"
-                                  : a.teacher_feedback
-                                  ? "수정 내용 재전달"
-                                  : "피드백 확정"}
+                                  : "저장 · 학생에게 전달"}
                               </button>
                             </div>
-                          </>
-                        ) : (
-                          <p className="text-xs text-slate-400">아직 답변하지 않았습니다.</p>
+
+                            {/* 지난 회차 */}
+                            {pastRounds.length > 0 && (
+                              <div className="mt-4 border-t border-slate-100 pt-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setPastOpen((p) => ({ ...p, [qRow.id]: !p[qRow.id] }))}
+                                  className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-700"
+                                >
+                                  지난 기록 {pastRounds.length}건
+                                  <svg
+                                    className={`h-3.5 w-3.5 transition-transform ${pastOpen[qRow.id] ? "rotate-180" : ""}`}
+                                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"
+                                  >
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                  </svg>
+                                </button>
+
+                                {pastOpen[qRow.id] && (
+                                  <div className="mt-2 space-y-2">
+                                    {[...pastRounds].reverse().map((r) => (
+                                      <div key={r.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                                        <p className="text-[11px] font-black text-slate-500">
+                                          {r.round}차
+                                          {r.answered_at && (
+                                            <span className="ml-1.5 font-normal text-slate-400">{fmtTime(r.answered_at)}</span>
+                                          )}
+                                        </p>
+                                        {r.student_answer && (
+                                          <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-600">
+                                            {r.student_answer}
+                                          </p>
+                                        )}
+                                        {r.teacher_feedback && (
+                                          <p className="mt-2 whitespace-pre-wrap border-t border-slate-200 pt-2 text-xs leading-relaxed text-seum-blue">
+                                            {r.teacher_feedback}
+                                          </p>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     );
                   })}
+
                 </div>
               )}
               </>
@@ -976,6 +1700,98 @@ export default function TeacherClassInterview({ courseType = "group" }) {
             </>
           )}
         </>
+      )}
+
+      {/* ===== 생기부 질문 추가 · 수정 팝업 ===== */}
+      {qModal && (
+        <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={() => setQModal(null)}>
+          <div className="my-8 w-full max-w-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between pb-4">
+              <h3 className="text-lg font-bold text-seum-navy">
+                {qModal.mode === "edit" ? "질문 수정" : "생기부 예상질문 추가"}
+              </h3>
+              <button type="button" onClick={() => setQModal(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+
+            {qModal.mode === "edit" ? (
+              <div className="border-t border-slate-200 pt-4">
+                <div className="mb-2 flex gap-1.5">
+                  {SOURCE_TYPES.map((t) => (
+                    <button key={t.key} type="button" onClick={() => setQType(t.key)}
+                      className={`flex-1 rounded-md py-2 text-sm font-bold transition ${
+                        qType === t.key ? "bg-seum-navy text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                      }`}>
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={qText}
+                  onChange={(e) => setQText(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue"
+                />
+              </div>
+            ) : (
+              <div className="border-t border-slate-200 pt-4">
+                <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
+                  {qList.map((r, idx) => (
+                    <div key={idx} className="flex items-start gap-2">
+                      <span className="w-6 shrink-0 pt-2.5 text-xs font-bold text-slate-400">{idx + 1}.</span>
+                      <div className="flex shrink-0 gap-1">
+                        {SOURCE_TYPES.map((t) => (
+                          <button key={t.key} type="button" onClick={() => setQRow(idx, { type: t.key })}
+                            className={`rounded-md px-2.5 py-2 text-xs font-bold transition ${
+                              r.type === t.key ? "bg-seum-navy text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                            }`}>
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        value={r.text}
+                        onChange={(e) => setQRow(idx, { text: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && idx === qList.length - 1 && r.text.trim()) addQRow();
+                        }}
+                        placeholder="질문을 입력하세요"
+                        className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue"
+                      />
+                      <button type="button" onClick={() => removeQRow(idx)}
+                        disabled={qList.length <= 1}
+                        className="shrink-0 px-1 py-2 text-sm text-slate-300 hover:text-red-500 disabled:opacity-30">
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <button type="button" onClick={addQRow}
+                  className="mt-2 w-full rounded-lg border border-dashed border-slate-300 py-2.5 text-sm font-bold text-slate-500 hover:bg-slate-50">
+                  + 줄 추가
+                </button>
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  마지막 줄에서 Enter를 눌러도 줄이 늘어납니다. 비워둔 줄은 저장되지 않습니다.
+                </p>
+              </div>
+            )}
+
+            <div className="mt-4 border-t border-slate-200 pt-4">
+              <button
+                type="button"
+                onClick={saveQuestion}
+                disabled={qSaving}
+                className="w-full bg-seum-blue py-3 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-60"
+              >
+                {qSaving
+                  ? "저장 중..."
+                  : qModal.mode === "edit"
+                  ? "수정 저장"
+                  : `${qList.filter((r) => r.text.trim()).length}개 저장`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
