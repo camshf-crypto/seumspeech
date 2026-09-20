@@ -5,6 +5,20 @@ import QuickBookModal from "./QuickBookModal";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
+// 달력 칸 안의 일정 한 줄.
+// 한 줄에 10자까지만 보여주고, 하루에 4개까지만 그린다.
+// 지점을 맨 앞에 둔다. (예: 마곡 11:00)
+const CELL_MAX = 4;
+const CELL_CHARS = 11;
+const cut = (t) => {
+  const v = String(t ?? "").trim();
+  return v.length > CELL_CHARS ? v.slice(0, CELL_CHARS) : v;
+};
+const CELL_ITEM =
+  "truncate whitespace-nowrap rounded px-0.5 py-px text-[9px] leading-[1.4] tracking-[-0.02em]";
+
+const shortBranch = (name) => String(name ?? "").replace("점", "").slice(0, 2);
+
 const STATUS_LABEL = {
   new: "신규", scheduled: "방문예약", done: "상담완료",
   enrolled: "등록전환", dropped: "미등록종료",
@@ -334,15 +348,15 @@ export default function AdminScheduleTab() {
             <button onClick={nextMonth} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">→</button>
           </div>
 
-          <div className="mb-1 grid grid-cols-7 gap-1">
+          <div className="mb-1 grid grid-cols-7 gap-px sm:gap-1">
             {WEEKDAYS.map((d, i) => (
               <div key={d} className={`py-2 text-center text-xs font-bold ${i === 0 ? "text-red-400" : i === 6 ? "text-blue-400" : "text-slate-400"}`}>{d}</div>
             ))}
           </div>
 
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-px sm:gap-1">
             {cells.map((d, idx) => {
-              if (d === null) return <div key={`empty-${idx}`} className="min-h-[110px]" />;
+              if (d === null) return <div key={`empty-${idx}`} className="min-h-[118px]" />;
               const ds = dateStr(d);
               const wd = new Date(year, month, d).getDay();
               const daySlots = slotsOnDate(ds);
@@ -355,46 +369,68 @@ export default function AdminScheduleTab() {
                   key={d}
                   type="button"
                   onClick={() => setSelectedDate(ds)}
-                  className={`flex min-h-[110px] w-full flex-col rounded-lg border p-1.5 text-left align-top transition ${
+                  className={`flex min-h-[118px] w-full flex-col rounded-lg border p-1 text-left align-top transition sm:p-1.5 ${
                     isSelected ? "border-seum-blue bg-blue-50" : "border-slate-200 bg-white hover:bg-slate-50"
                   }`}
                 >
-                  <span className={`text-xs font-bold ${wd === 0 ? "text-red-400" : wd === 6 ? "text-blue-400" : "text-slate-600"}`}>{d}</span>
+                  <span className={`text-[13px] font-bold sm:text-xs ${wd === 0 ? "text-red-400" : wd === 6 ? "text-blue-400" : "text-slate-600"}`}>{d}</span>
                   <div className="mt-1 space-y-0.5">
-                    {daySlots.map((s) => (
-                      <div key={s.id} className="truncate rounded bg-purple-500/15 px-1 py-0.5 text-[9px] leading-tight text-purple-700">
-                        {s.start_time.slice(0, 5)}~{s.end_time.slice(0, 5)}
-                        {pickTeacher === "all" && s.teacher?.name && ` ${s.teacher.name}`}
-                      </div>
-                    ))}
-                    {dayCourses.map((c) => (
-                      <div key={c.id} className="truncate rounded bg-seum-blue/15 px-1 py-0.5 text-[9px] leading-tight text-seum-blue">
-                        [{branchName(c.branch_id)}] {c.start_time?.slice(0, 5)} {c.title}
-                      </div>
-                    ))}
-                    {dayBookings.map((b) => (
-                      <div key={b.id} className={`truncate rounded px-1 py-0.5 text-[9px] font-medium leading-tight ${bookingCellCls(b)}`}>
-                        {bookingMark(b)}
-                        {b.branch?.name ? `[${b.branch.name.replace("점", "")}] ` : ""}
-                        {bookingLabel(b)}
-                        {(() => { const rm = remainingMap[b.id]; return rm && rm.remainAfter != null ? ` (${rm.remainAfter}/${rm.total})` : ""; })()}
-                        {pickTeacher === "all" && b.teacher?.name ? ` ${b.teacher.name}쌤` : ""}
-                      </div>
-                    ))}
-                    {dayConsults.map((c) => (
-                      <div
-                        key={c.id}
-                        className="block w-full truncate rounded bg-amber-500/20 px-1 py-0.5 text-left text-[9px] leading-tight text-amber-700"
-                      >
-                        🗓 {consultTime(c.scheduled_at)} {c.name} 상담
-                      </div>
-                    ))}
+                    {(() => {
+                      // 이 날 일정을 한 줄짜리 항목으로 모은다
+                      const items = [];
+                      daySlots.forEach((s2) =>
+                        items.push({
+                          key: `s${s2.id}`,
+                          cls: "bg-purple-500/15 text-purple-700",
+                          text: `${shortBranch(s2.branch?.name)} ${s2.start_time.slice(0, 5)}`,
+                        })
+                      );
+                      dayCourses.forEach((c) =>
+                        items.push({
+                          key: `c${c.id}`,
+                          cls: "bg-seum-blue/15 text-seum-blue",
+                          text: `${branchName(c.branch_id).slice(0, 2)} ${c.start_time?.slice(0, 5) ?? ""}`,
+                        })
+                      );
+                      dayBookings.forEach((b) =>
+                        items.push({
+                          key: `b${b.id}`,
+                          cls: bookingCellCls(b),
+                          text: `${shortBranch(b.branch?.name)} ${b.start_time?.slice(0, 5) ?? ""} ${b.student?.name ?? ""}`,
+                        })
+                      );
+                      dayConsults.forEach((c) =>
+                        items.push({
+                          key: `k${c.id}`,
+                          cls: "bg-amber-500/20 text-amber-700",
+                          text: `상담 ${consultTime(c.scheduled_at)}`,
+                        })
+                      );
+
+                      const shown = items.slice(0, CELL_MAX);
+                      const more = items.length - shown.length;
+
+                      return (
+                        <>
+                          {shown.map((it) => (
+                            <div key={it.key} className={`${CELL_ITEM} ${it.cls}`}>
+                              {cut(it.text)}
+                            </div>
+                          ))}
+                          {more > 0 && (
+                            <div className="px-1 text-[10px] font-bold leading-tight text-slate-400">
+                              +{more}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </button>
               );
             })}
           </div>
-          <p className="mt-2 text-xs text-slate-400">보라 = 가능시간 / 파랑 = 수업 / 주황 = 방문상담 · 출석(초록) 결석(빨강) 보류(회색)</p>
+          <p className="mt-2 text-xs text-slate-400">보라 = 가능시간 · 파랑 = 수업 · 주황 = 상담 / 출석(초록) 결석(빨강) 보류(회색)</p>
         </div>
 
         {/* 오른쪽 상세 - 데스크탑 */}

@@ -4,6 +4,19 @@ import { useAuth } from "../../contexts/AuthContext";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
+// 달력 칸 안의 일정 한 줄. (원장 화면과 같은 규칙)
+// 지점을 맨 앞에 두고, 한 줄에 11자까지, 하루 4개까지만 그린다.
+const CELL_MAX = 4;
+const CELL_CHARS = 11;
+const cut = (t) => {
+  const v = String(t ?? "").trim();
+  return v.length > CELL_CHARS ? v.slice(0, CELL_CHARS) : v;
+};
+const CELL_ITEM =
+  "truncate whitespace-nowrap rounded px-0.5 py-px text-[9px] leading-[1.4] tracking-[-0.02em]";
+
+const shortBranch = (name) => String(name ?? "").replace("점", "").slice(0, 2);
+
 // 시간 버튼 (원장 화면과 같은 방식)
 const MINUTES = [0, 10, 20, 30, 40, 50];
 const AM_HOURS = [8, 9, 10, 11];
@@ -502,15 +515,15 @@ export default function AvailabilityTab() {
             <button onClick={nextMonth} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">→</button>
           </div>
 
-          <div className="mb-1 grid grid-cols-7 gap-1">
+          <div className="mb-1 grid grid-cols-7 gap-px sm:gap-1">
             {WEEKDAYS.map((d, i) => (
               <div key={d} className={`py-2 text-center text-xs font-bold ${i === 0 ? "text-red-400" : i === 6 ? "text-blue-400" : "text-slate-400"}`}>{d}</div>
             ))}
           </div>
 
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-px sm:gap-1">
             {cells.map((d, idx) => {
-              if (d === null) return <div key={`empty-${idx}`} className="min-h-[80px] md:min-h-[120px]" />;
+              if (d === null) return <div key={`empty-${idx}`} className="min-h-[118px]" />;
               const ds = dateStr(d);
               const wd = new Date(year, month, d).getDay();
               const daySlots = slotsOnDate(ds);
@@ -521,45 +534,61 @@ export default function AvailabilityTab() {
                 <button
                   key={d}
                   onClick={() => setSelectedDate(ds)}
-                  className={`flex min-h-[80px] flex-col rounded-lg border p-1.5 text-left transition md:min-h-[120px] ${
+                  className={`flex min-h-[118px] flex-col rounded-lg border p-1 text-left transition sm:p-1.5 ${
                     isSelected ? "border-seum-blue bg-blue-50" : "border-slate-200 bg-white hover:bg-slate-50"
                   }`}
                 >
-                  <span className={`block text-xs font-bold leading-none ${wd === 0 ? "text-red-400" : wd === 6 ? "text-blue-400" : "text-slate-600"}`}>{d}</span>
+                  <span className={`block text-[13px] font-bold leading-none sm:text-xs ${wd === 0 ? "text-red-400" : wd === 6 ? "text-blue-400" : "text-slate-600"}`}>{d}</span>
                   <div className="mt-1 space-y-0.5">
-                    {daySlots.map((s) => (
-                      <div key={s.id} className="truncate rounded bg-purple-500/15 px-1 py-0.5 text-[9px] leading-tight text-purple-700">
-                        {s.branch?.name ? `[${s.branch.name.replace("점", "")}] ` : ""}
-                        {s.start_time.slice(0, 5)}~{s.end_time.slice(0, 5)}
-                      </div>
-                    ))}
-                    {dayCourses.map((c) => (
-                      <div key={c.id} className="truncate rounded bg-seum-blue/15 px-1 py-0.5 text-[9px] leading-tight text-seum-blue">
-                        {branchName(c.branch_id) ? `[${branchName(c.branch_id)}] ` : ""}
-                        {c.start_time?.slice(0, 5)} {c.title}
-                      </div>
-                    ))}
-                    {dayBookings.map((b) => {
-                      const cellCls =
-                        b.attended === "hold" ? "bg-slate-200 text-slate-500"
-                        : b.attended === "present" ? "bg-green-500/25 text-green-700"
-                        : b.attended === "absent" ? "bg-red-500/25 text-red-600"
-                        : b.attended === "late" ? "bg-amber-500/25 text-amber-700"
-                        : "bg-seum-blue/25 text-seum-blue";
-                      const mark =
-                        b.attended === "hold" ? "[보류] "
-                        : b.attended === "present" ? "[출석] "
-                        : b.attended === "absent" ? "[결석] "
-                        : b.attended === "late" ? "[지각] "
-                        : "";
-                      return (
-                        <div key={b.id} className={`truncate rounded px-1 py-0.5 text-[9px] font-medium leading-tight ${cellCls}`}>
-                          {mark}
-                          {b.branch?.name ? `[${b.branch.name.replace("점", "")}] ` : ""}
-                          {b.start_time?.slice(0, 5)}{b.end_time ? `~${b.end_time.slice(0, 5)}` : ""} {b.student?.name ?? b.course?.title ?? "수업"}
-                        </div>
+                    {(() => {
+                      // 이 날 일정을 한 줄짜리 항목으로 모은다
+                      const items = [];
+                      daySlots.forEach((s2) =>
+                        items.push({
+                          key: `s${s2.id}`,
+                          cls: "bg-purple-500/15 text-purple-700",
+                          text: `${shortBranch(s2.branch?.name)} ${s2.start_time.slice(0, 5)}`,
+                        })
                       );
-                    })}
+                      dayCourses.forEach((c) =>
+                        items.push({
+                          key: `c${c.id}`,
+                          cls: "bg-seum-blue/15 text-seum-blue",
+                          text: `${branchName(c.branch_id).slice(0, 2)} ${c.start_time?.slice(0, 5) ?? ""}`,
+                        })
+                      );
+                      dayBookings.forEach((b) => {
+                        const cellCls =
+                          b.attended === "hold" ? "bg-slate-200 text-slate-500"
+                          : b.attended === "present" ? "bg-green-500/25 text-green-700"
+                          : b.attended === "absent" ? "bg-red-500/25 text-red-600"
+                          : b.attended === "late" ? "bg-amber-500/25 text-amber-700"
+                          : "bg-seum-blue/25 text-seum-blue";
+                        items.push({
+                          key: `b${b.id}`,
+                          cls: cellCls,
+                          text: `${shortBranch(b.branch?.name)} ${b.start_time?.slice(0, 5) ?? ""} ${b.student?.name ?? ""}`,
+                        });
+                      });
+
+                      const shown = items.slice(0, CELL_MAX);
+                      const more = items.length - shown.length;
+
+                      return (
+                        <>
+                          {shown.map((it) => (
+                            <div key={it.key} className={`${CELL_ITEM} ${it.cls}`}>
+                              {cut(it.text)}
+                            </div>
+                          ))}
+                          {more > 0 && (
+                            <div className="px-1 text-[9px] font-bold leading-tight text-slate-400">
+                              +{more}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </button>
               );
