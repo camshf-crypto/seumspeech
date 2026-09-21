@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import PtReview from "./PtReview";
 import TeacherMockPanel from "./TeacherMockPanel";
+import GuideTour from "../../components/GuideTour";
 import {
   getCategory,
   getSubLabel,
@@ -203,6 +204,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
   const MODE_LABEL = courseType === "group" ? "단체반" : "1:1 수업";
 
   const [myId, setMyId] = useState(null);     // 로그인한 선생님 id
+  const [seenGuides, setSeenGuides] = useState(null);   // 탭 안내를 본 기록
   const [classes, setClasses] = useState([]); // [{course, assignment}]
   const [classesLoading, setClassesLoading] = useState(true);
 
@@ -304,6 +306,19 @@ export default function TeacherClassInterview({ courseType = "group" }) {
       setClassesLoading(false);
     })();
   }, [courseType]);
+
+  // 탭별 처음 안내 — 어느 탭을 이미 봤는지
+  useEffect(() => {
+    if (!myId) return;
+    (async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("seen_guides")
+        .eq("id", myId)
+        .maybeSingle();
+      setSeenGuides(data?.seen_guides ?? {});
+    })();
+  }, [myId]);
 
   // 2) 반 선택 → 학생 목록
   useEffect(() => {
@@ -837,6 +852,12 @@ export default function TeacherClassInterview({ courseType = "group" }) {
     setOpenMap((p) => ({ ...p, [qid]: !cur }));
   };
 
+  // 튜토리얼이 짚을 카드 — 펼쳐진 첫 카드. 없으면 첫 카드.
+  const guideRowId =
+    visibleRows.find((r) => isOpen(r, r._answer, !!r._answer?.student_answer?.trim()))?.id ??
+    visibleRows[0]?.id ??
+    null;
+
   // ── 생기부 질문 ──────────────────────────────────────
   const openNewQuestion = () => {
     setQModal({ mode: "new", row: null });
@@ -1114,7 +1135,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
             면접 카테고리가 배정된 {MODE_LABEL}이(가) 없습니다. (어드민 &gt; 면접설정에서 배정)
           </p>
         ) : (
-          <div className="flex flex-wrap gap-2">
+          <div data-guide="ti-class" className="flex flex-wrap gap-2">
             {classes.map((c) => {
               const on = selClass?.course.id === c.course.id;
               const badge = getCategoryLabel(c.assignment.category_key) +
@@ -1174,7 +1195,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
           ) : (
             <>
               {/* 면접 컨셉 */}
-              <div className="mb-5 border-t border-slate-200 pt-4">
+              <div data-guide="ti-concept" className="mb-5 border-t border-slate-200 pt-4">
                 <div className="mb-1.5 flex items-center justify-between">
                   <p className="text-sm font-medium text-slate-500">면접 컨셉</p>
                   {savedConcept ? (
@@ -1207,7 +1228,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
               </div>
 
               {/* 탭 */}
-              <div className="mb-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+              <div data-guide="ti-tabs" className="mb-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
                 {tabs.map((t) => {
                   const on = activeTab === t.key;
                   const st = tabStats[t.key];
@@ -1233,7 +1254,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
 
               {/* 대입 기출 — 학생이 고른 지원 목록 */}
               {isUnivGichul && (
-                <div className="mb-4 rounded-xl bg-slate-50 p-3">
+                <div data-guide="ti-picks" className="mb-4 rounded-xl bg-slate-50 p-3">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <p className="text-xs font-medium text-slate-500">
                       {univPicks.length > 0
@@ -1333,13 +1354,13 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                 </div>
                 <div className="flex items-center gap-2">
                   {isPersonal && unsentCount > 0 && (
-                    <button type="button" onClick={sendQuestions} disabled={sendingQ}
+                    <button type="button" data-guide="ti-sendq" onClick={sendQuestions} disabled={sendingQ}
                       className="rounded-lg bg-seum-navy px-4 py-2 text-sm font-bold text-white hover:bg-[#0d2647] disabled:opacity-50">
                       {sendingQ ? "보내는 중..." : `저장 및 보내기 (${unsentCount})`}
                     </button>
                   )}
                   {isPersonal && (
-                    <button type="button" onClick={openNewQuestion}
+                    <button type="button" data-guide="ti-add" onClick={openNewQuestion}
                       className="rounded-lg border border-seum-navy px-4 py-2 text-sm font-bold text-seum-navy hover:bg-slate-50">
                       + 질문 추가
                     </button>
@@ -1379,6 +1400,8 @@ export default function TeacherClassInterview({ courseType = "group" }) {
               ) : (
                 <div className="space-y-4">
                   {visibleRows.map((qRow, i) => {
+                    // 튜토리얼이 짚을 카드 — 펼쳐진 첫 카드
+                    const guideCard = qRow.id === guideRowId;
                     const a = qRow._answer;
                     const hasAnswer = !!a?.student_answer?.trim();
                     const open = isOpen(qRow, a, hasAnswer);
@@ -1408,6 +1431,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                         {/* 머리 — 누르면 접었다 펼친다 */}
                         <button
                           type="button"
+                          data-guide={guideCard ? "ti-card" : undefined}
                           onClick={() => toggleOpen(qRow.id, open)}
                           className="flex w-full items-start justify-between gap-3 p-4 text-left hover:bg-slate-50"
                         >
@@ -1545,7 +1569,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                                     </svg>
                                   )}
                                 </button>
-                                <button type="button" onClick={() => genSingle(qRow)}
+                                <button type="button" data-guide={guideCard ? "ti-ai" : undefined} onClick={() => genSingle(qRow)}
                                   disabled={!hasAnswer || aiLoadingId === a?.id || bulkRunning}
                                   className="shrink-0 rounded-md border border-seum-blue px-2.5 py-0.5 text-xs font-bold text-seum-blue hover:bg-blue-50 disabled:opacity-40">
                                   {aiLoadingId === a?.id ? "분석 중..." : a?.ai_draft ? "🔄 다시" : "✨ AI 분석"}
@@ -1579,6 +1603,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                                   </p>
                                   <button
                                     type="button"
+                                    data-guide={guideCard ? "ti-followup" : undefined}
                                     onClick={() => genFollowUp(qRow)}
                                     disabled={followSaving === qRow.id + ":gen"}
                                     className="rounded-md border border-emerald-600 px-2.5 py-0.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
@@ -1615,7 +1640,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                             <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-seum-blue">
                               학생에게 보낼 피드백
                             </p>
-                            <textarea value={draftEdits[aKey] ?? ""} onChange={(e) => setDraftEdits((p) => ({ ...p, [aKey]: e.target.value }))}
+                            <textarea data-guide={guideCard ? "ti-feedback" : undefined} value={draftEdits[aKey] ?? ""} onChange={(e) => setDraftEdits((p) => ({ ...p, [aKey]: e.target.value }))}
                               rows={6}
                               placeholder="AI 분석을 참고해 학생에게 전할 말을 직접 작성하세요."
                               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm leading-relaxed outline-none focus:border-seum-blue" />
@@ -1628,6 +1653,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                               </span>
                               <button
                                 type="button"
+                                data-guide={guideCard ? "ti-send" : undefined}
                                 onClick={() => sendToStudent(qRow)}
                                 disabled={savingId === aKey || (confirmed && !ansDirty)}
                                 className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
@@ -1700,6 +1726,16 @@ export default function TeacherClassInterview({ courseType = "group" }) {
             </>
           )}
         </>
+      )}
+
+      {/* 탭을 처음 눌렀을 때 한 번만 뜨는 안내 */}
+      {seenGuides && myId && selStudent && activeTab && !loading && !qModal && (
+        <GuideTour
+          userId={myId}
+          guideKey={`ti-${activeTab}`}
+          seen={seenGuides}
+          onDone={(next) => setSeenGuides(next)}
+        />
       )}
 
       {/* ===== 생기부 질문 추가 · 수정 팝업 ===== */}

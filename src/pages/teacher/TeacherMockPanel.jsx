@@ -434,7 +434,7 @@ export default function TeacherMockPanel({ student, teacherId, concept }) {
             {concept ? ` · 컨셉 ${concept}` : ""}
           </span>
         </div>
-        <button type="button" onClick={openModal}
+        <button type="button" data-guide="ti-mock-new" onClick={openModal}
           className="rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4]">
           모의고사 출제
         </button>

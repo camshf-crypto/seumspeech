@@ -487,7 +487,7 @@ export default function AvailabilityTab() {
   return (
     <div>
       {/* 탭 — 여기서 고른 종류로 + 버튼이 열린다 */}
-      <div className="mb-4 flex gap-2">
+      <div data-guide="t-sch-tabs" className="mb-4 flex gap-2">
         <button
           onClick={() => setTab("avail")}
           className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
@@ -521,7 +521,7 @@ export default function AvailabilityTab() {
             ))}
           </div>
 
-          <div className="grid grid-cols-7 gap-px sm:gap-1">
+          <div data-guide="t-sch-cal" className="grid grid-cols-7 gap-px sm:gap-1">
             {cells.map((d, idx) => {
               if (d === null) return <div key={`empty-${idx}`} className="min-h-[118px]" />;
               const ds = dateStr(d);

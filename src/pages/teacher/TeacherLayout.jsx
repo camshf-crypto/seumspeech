@@ -12,6 +12,7 @@ import StudentMaterialsView from "../../components/StudentMaterialsView";
 import TeacherInterviewTab from "./TeacherInterviewTab";
 import TeacherMemosTab from "./TeacherMemosTab";
 import TeacherMyPageTab from "./TeacherMyPageTab";
+import GuideTour from "../../components/GuideTour";
 
 const MENUS = [
   { key: "schedule", label: "내 스케줄" },
@@ -42,6 +43,7 @@ export default function TeacherLayout() {
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [seenGuides, setSeenGuides] = useState(null);   // 안내를 본 메뉴
 
   const loadUnread = async () => {
     if (!profile) return;
@@ -56,6 +58,19 @@ export default function TeacherLayout() {
   useEffect(() => {
     if (profile) loadUnread();
   }, [profile]);
+
+  // 어느 메뉴의 안내를 이미 봤는지
+  useEffect(() => {
+    if (!profile?.id) return;
+    (async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("seen_guides")
+        .eq("id", profile.id)
+        .maybeSingle();
+      setSeenGuides(data?.seen_guides ?? {});
+    })();
+  }, [profile?.id]);
 
   useEffect(() => {
     if (!profile) return;
@@ -234,6 +249,16 @@ export default function TeacherLayout() {
 
         <main className="flex-1 p-4 md:p-8">{renderContent()}</main>
       </div>
+
+      {/* 메뉴를 처음 눌렀을 때 한 번만 뜨는 안내 */}
+      {seenGuides && profile?.id && (
+        <GuideTour
+          userId={profile.id}
+          guideKey={`t-${active}`}
+          seen={seenGuides}
+          onDone={(next) => setSeenGuides(next)}
+        />
+      )}
     </div>
   );
 }
