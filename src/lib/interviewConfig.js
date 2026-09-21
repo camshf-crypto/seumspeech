@@ -105,6 +105,26 @@ export function getStudentTabs(categoryKey) {
 }
 
 // ============================================================
+// 학생에게 처음부터 열려 있는 탭
+// 여기 없는 탭은 잠겨 있다가 선생님이 열어줘야 보인다.
+// 카테고리가 목록에 없으면 모든 탭이 열려 있다. (공무원·공기업 등)
+//
+// 선생님이 학생별로 조절하면 interview_assignments.open_tabs 에 저장되고,
+// 그때부터는 이 기본값 대신 저장된 목록을 따른다.
+// ============================================================
+export const DEFAULT_OPEN_TABS = {
+  univ: ["insung"],   // 생기부는 선생님이 질문을 보낼 때 자동으로 열린다
+};
+
+// 이 학생에게 열린 탭 키 목록
+export function getOpenTabKeys(categoryKey, savedOpenTabs) {
+  if (Array.isArray(savedOpenTabs)) return savedOpenTabs;
+  const def = DEFAULT_OPEN_TABS[categoryKey];
+  if (def) return def;
+  return getStudentTabs(categoryKey).map((t) => t.key);   // 기본값이 없으면 전부 열림
+}
+
+// ============================================================
 // 기출문제 계열 선택(series)
 // interview_questions_v2.series_key 값과 1:1 매칭
 //

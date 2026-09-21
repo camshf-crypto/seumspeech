@@ -15,6 +15,7 @@ import {
   getTabLabel,
   getSeriesLabel,
   getStudentTabs,
+  getOpenTabKeys,
 } from "../../lib/interviewConfig";
 
 // 답변은 카테고리와 상관없이 이 테이블 한 곳에 모은다.
@@ -428,7 +429,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       setLoading(true);
       const { data: personal } = await supabase
         .from("interview_assignments")
-        .select("category_key, sub_key, concept")
+        .select("category_key, sub_key, concept, open_tabs")
         .eq("student_id", studentId)
         .maybeSingle();
 
@@ -450,7 +451,8 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       if (!alive) return;
       setAssignment(resolved);
       if (resolved) {
-        const t = getStudentTabs(resolved.category_key);
+        const open = getOpenTabKeys(resolved.category_key, resolved.open_tabs);
+        const t = getStudentTabs(resolved.category_key).filter((x) => open.includes(x.key));
         if (t.length) setActiveTab(t[0].key);
       }
       setLoading(false);
@@ -777,6 +779,9 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const cat = getCategory(assignment.category_key);
   const subLabel = getSubLabel(assignment.category_key, assignment.sub_key);
   const tabs = getStudentTabs(assignment.category_key);   // 모의고사 탭은 선생님 전용
+  // 선생님이 열어준 탭만 누를 수 있다. 잠긴 탭은 자물쇠로 보여준다.
+  const openKeys = getOpenTabKeys(assignment.category_key, assignment.open_tabs);
+  const isLocked = (key) => !openKeys.includes(key);
   const seriesList = getSeries(assignment.category_key, assignment.sub_key);
 
   const isUniv = assignment.category_key === "univ";
@@ -1113,15 +1118,25 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       <div data-guide="iv-tabs" className="no-print mb-5 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
         {tabs.map((t) => {
           const on = activeTab === t.key;
+          const lockedTab = isLocked(t.key);
           return (
             <button
               key={t.key}
               type="button"
-              onClick={() => setActiveTab(t.key)}
+              onClick={() =>
+                lockedTab
+                  ? alert(`${t.label}은(는) 아직 열리지 않았어요.\n수업 진도에 맞춰 선생님이 열어주면 볼 수 있어요.`)
+                  : setActiveTab(t.key)
+              }
               className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
-                on ? "bg-seum-blue text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                lockedTab
+                  ? "cursor-not-allowed bg-slate-50 text-slate-300"
+                  : on
+                  ? "bg-seum-blue text-white"
+                  : "bg-slate-100 text-slate-500 hover:bg-slate-200"
               }`}
             >
+              {lockedTab && <span className="mr-1">🔒</span>}
               {t.label}
             </button>
           );
@@ -1192,7 +1207,9 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       {renderBody()}
 
       {/* 탭을 처음 눌렀을 때 한 번만 뜨는 안내 */}
-      {seenGuides && activeTab && !loadingQ && (
+      {/* 생기부는 질문이 온 뒤에 안내한다 (빈 탭에서 보고 지나가지 않게) */}
+      {seenGuides && activeTab && !loadingQ &&
+        !(activeTab === "saenggibu" && questions.length === 0) && (
         <GuideTour
           userId={studentId}
           guideKey={`iv-${activeTab}`}

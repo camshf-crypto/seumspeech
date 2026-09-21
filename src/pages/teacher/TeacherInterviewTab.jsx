@@ -9,6 +9,8 @@ import {
   getCategoryLabel,
   getTabLabel,
   getSeriesLabel,
+  getStudentTabs,
+  getOpenTabKeys,
 } from "../../lib/interviewConfig";
 
 // ============================================================
@@ -221,6 +223,10 @@ export default function TeacherClassInterview({ courseType = "group" }) {
   const [savedConcept, setSavedConcept] = useState(""); // DB에 저장된 값
   const [conceptSaving, setConceptSaving] = useState(false);
 
+  // 학생에게 열어준 탭 (null = 기본값을 따른다)
+  const [openTabs, setOpenTabs] = useState(null);
+  const [tabSaving, setTabSaving] = useState(null);   // 저장 중인 탭 키
+
   // 기출 탭
   const [gichulView, setGichulView] = useState(null);      // 보고 있는 series_key (null = 미선택)
   const [studentSeries, setStudentSeries] = useState([]);  // 이 학생이 답변한 직렬
@@ -361,13 +367,14 @@ export default function TeacherClassInterview({ courseType = "group" }) {
     (async () => {
       const { data } = await supabase
         .from("interview_assignments")
-        .select("concept")
+        .select("concept, open_tabs")
         .eq("student_id", selStudent.id)
         .maybeSingle();
       if (!alive) return;
       const c = data?.concept ?? "";
       setConcept(c);
       setSavedConcept(c);
+      setOpenTabs(data?.open_tabs ?? null);
     })();
     return () => { alive = false; };
   }, [selStudent]);
@@ -415,6 +422,39 @@ export default function TeacherClassInterview({ courseType = "group" }) {
     setConceptSaving(false);
     if (error) return alert("컨셉 저장 실패: " + error.message);
     setSavedConcept(concept.trim());
+  };
+
+  // 탭 열기 / 잠그기 — 누르는 즉시 저장, 학생 화면에 바로 반영
+  const toggleTab = async (key) => {
+    if (!selStudent || !selClass) return;
+    const { category_key, sub_key } = selClass.assignment;
+    const cur = getOpenTabKeys(category_key, openTabs);
+    const opening = !cur.includes(key);
+    const label = getTabLabel(category_key, key);
+
+    if (!window.confirm(
+      opening
+        ? `${selStudent.name} 학생에게 [${label}]을(를) 열어줄까요?`
+        : `${selStudent.name} 학생의 [${label}]을(를) 잠글까요?\n학생이 쓴 답변은 지워지지 않습니다.`
+    )) return;
+
+    const next = opening ? [...cur, key] : cur.filter((k) => k !== key);
+    setTabSaving(key);
+    const { error } = await supabase
+      .from("interview_assignments")
+      .upsert(
+        {
+          student_id: selStudent.id,
+          category_key,
+          sub_key: sub_key ?? null,
+          open_tabs: next,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "student_id" }
+      );
+    setTabSaving(null);
+    if (error) return alert("저장 실패: " + error.message);
+    setOpenTabs(next);
   };
 
   // 4) 학생 선택 → 탭별 현황 집계
@@ -931,8 +971,30 @@ export default function TeacherClassInterview({ courseType = "group" }) {
       .from("student_questions")
       .update({ sent_at: new Date().toISOString() })
       .in("id", targets.map((r) => r.id));
+    if (error) { setSendingQ(false); return alert("보내기 실패: " + error.message); }
+
+    // 질문을 보냈으니 학생의 생기부 탭을 연다 (이미 열려 있으면 그대로)
+    const { category_key, sub_key } = selClass.assignment;
+    const cur = getOpenTabKeys(category_key, openTabs);
+    if (!cur.includes(PERSONAL_TAB)) {
+      const next = [...cur, PERSONAL_TAB];
+      const { error: tErr } = await supabase
+        .from("interview_assignments")
+        .upsert(
+          {
+            student_id: selStudent.id,
+            category_key,
+            sub_key: sub_key ?? null,
+            open_tabs: next,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "student_id" }
+        );
+      if (tErr) console.error("생기부 탭 열기 실패:", tErr);
+      else setOpenTabs(next);
+    }
+
     setSendingQ(false);
-    if (error) return alert("보내기 실패: " + error.message);
     loadTab();
   };
 
@@ -1224,6 +1286,33 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                   {isUniv
                     ? "학생이 내세울 구체적인 진로 방향을 적으세요. AI가 이 컨셉을 기준으로 답변과 활동이 맞는지 봅니다."
                     : "학생이 내세울 구체적인 진로 방향을 적으세요. 현재 AI 피드백은 대입 면접에서만 컨셉을 사용합니다."}
+                </p>
+              </div>
+
+              {/* 학생에게 열어줄 탭 */}
+              <div data-guide="ti-open-tabs" className="mb-5 border-t border-slate-200 pt-4">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-sm font-medium text-slate-500">학생에게 열어준 탭</p>
+                  <span className="text-[11px] text-slate-400">누르면 열고 잠급니다</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {getStudentTabs(selClass.assignment.category_key).map((t) => {
+                    const open = getOpenTabKeys(selClass.assignment.category_key, openTabs).includes(t.key);
+                    return (
+                      <button key={t.key} type="button" onClick={() => toggleTab(t.key)}
+                        disabled={tabSaving === t.key}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition disabled:opacity-50 ${
+                          open
+                            ? "border-green-300 bg-green-50 text-green-700"
+                            : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50"
+                        }`}>
+                        {open ? "🔓" : "🔒"} {t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  잠긴 탭은 학생 화면에서 누를 수 없습니다. 수업 진도에 맞춰 열어주세요.
                 </p>
               </div>
 

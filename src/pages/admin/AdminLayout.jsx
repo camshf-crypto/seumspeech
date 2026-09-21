@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { supabase } from "../../lib/supabase";
 import DashboardTab from "./DashboardTab";
 import CoursesTab from "./CoursesTab";
 import StudentsTab from "./StudentsTab";
+import AssignTab from "./AssignTab";
 import TeachersTab from "./TeachersTab";
 import AdminScheduleTab from "./AdminScheduleTab";
 import ConsultTab from "./ConsultTab";
@@ -23,6 +25,7 @@ const MENUS = [
   { key: "dashboard", label: "대시보드" },
   { key: "courses", label: "반/수업 개설" },
   { key: "students", label: "수강생(수업) 관리" },
+  { key: "assign", label: "학생 배정" },
   { key: "teachers", label: "선생님 관리" },
   { key: "consult", label: "상담 관리" },
   { key: "consultManual", label: "상담 매뉴얼" },
@@ -35,7 +38,16 @@ const MENUS = [
 
 export default function AdminLayout() {
   const { profile, signOut } = useAuth();
-  const [active, setActive] = useState("schedule");
+
+  // 어느 메뉴를 보고 있는지 주소에 남긴다 (?tab=schedule).
+  // 그래야 브라우저 뒤로가기가 로그인 화면이 아니라 이전 메뉴로 간다.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get("tab");
+  const active = MENUS.some((m) => m.key === tabFromUrl) ? tabFromUrl : "schedule";
+  const setActive = (key) => {
+    if (key === active) return;
+    setSearchParams({ tab: key });   // 기록에 쌓여서 뒤로가기가 동작한다
+  };
   const [menuOpen, setMenuOpen] = useState(false);
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(null);
@@ -88,6 +100,8 @@ export default function AdminLayout() {
         return <CoursesTab branchId={branchId} />;
       case "students":
         return <StudentsTab branchId={branchId} />;
+      case "assign":
+        return <AssignTab />;
       case "teachers":
         return <TeachersTab branchId={branchId} />;
       case "consult":
@@ -118,6 +132,7 @@ export default function AdminLayout() {
   // 수강생 관리·전체 스케줄은 화면 안에서 지점을 필터로 고르므로 상단 버튼을 쓰지 않는다
   const needsBranch =
     active !== "students" &&
+    active !== "assign" &&   // 학생 배정은 줄마다 지점이 보이므로 두 지점을 한 번에 본다
     active !== "schedule" &&
     active !== "settlement" &&
     active !== "dashboard" &&
