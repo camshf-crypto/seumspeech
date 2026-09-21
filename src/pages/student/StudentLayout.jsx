@@ -9,8 +9,14 @@ import ChatTab from "./ChatTab";
 import NotificationsTab from "./NotificationsTab";
 import StudentInterviewTab from "./StudentInterviewTab";
 import AbsenceRequestTab from "./AbsenceRequestTab";
+import AiWorkTask from "./AiWorkTask";
+import GuideTour from "../../components/GuideTour";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+// AI 직무역량 메뉴를 보여줄 면접 종류 (취업 준비생만)
+// 병원 등을 넣으려면 여기에 키를 더한다. 예: "hospital"
+const AIWORK_CATEGORIES = ["public_corp", "company"];
 
 // 주소(?tab=)로 들어올 수 있는 메뉴 키.
 // 면접 메뉴는 수강 상태에 따라 보였다 안 보였다 하지만,
@@ -21,6 +27,7 @@ const ALL_KEYS = [
   "materials",
   "homework",
   "interview",
+  "aiwork",
   "chat",
   "payments",
   "notifications",
@@ -51,8 +58,10 @@ export default function StudentLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [enrollments, setEnrollments] = useState([]);
   const [hasAssignment, setHasAssignment] = useState(false);
+  const [assignCategory, setAssignCategory] = useState(null);   // 개별 면접 배정 종류
   const [loading, setLoading] = useState(true);
   const [unread, setUnread] = useState(0);
+  const [seenGuides, setSeenGuides] = useState(null);   // 안내를 본 메뉴 { courses: true, ... }
 
   const load = async () => {
     setLoading(true);
@@ -67,10 +76,19 @@ export default function StudentLayout() {
     // 개별 면접 배정 확인
     const { data: asg } = await supabase
       .from("interview_assignments")
-      .select("student_id")
+      .select("student_id, category_key")
       .eq("student_id", profile.id)
       .maybeSingle();
     setHasAssignment(!!asg);
+    setAssignCategory(asg?.category_key ?? null);
+
+    // 어느 메뉴의 안내를 이미 봤는지
+    const { data: me } = await supabase
+      .from("profiles")
+      .select("seen_guides")
+      .eq("id", profile.id)
+      .maybeSingle();
+    setSeenGuides(me?.seen_guides ?? {});
 
     setLoading(false);
   };
@@ -130,6 +148,12 @@ export default function StudentLayout() {
       (e) => e.courses?.course_kind === "interview" || !!e.courses?.interview_category
     );
 
+  // 이 학생의 면접 종류 — 개별 배정과 수강 중인 수업 둘 다 본다
+  const myCategories = new Set(
+    [assignCategory, ...enrollments.map((e) => e.courses?.interview_category)].filter(Boolean)
+  );
+  const hasAiWork = AIWORK_CATEGORIES.some((c) => myCategories.has(c));
+
   const hasActive = enrollments.some((e) => !isExpired(e));
   const locked = enrollments.length > 0 && !hasActive;
 
@@ -139,6 +163,7 @@ export default function StudentLayout() {
     { key: "materials", label: "자료 제출함" },
     { key: "homework", label: "숙제" },
     ...(hasInterview ? [{ key: "interview", label: "나의 면접 수업" }] : []),
+    ...(hasAiWork ? [{ key: "aiwork", label: "AI 직무역량" }] : []),
     { key: "chat", label: "선생님과 채팅" },
     { key: "payments", label: "결제내역" },
     { key: "notifications", label: "알림" },
@@ -221,6 +246,15 @@ export default function StudentLayout() {
       {active === "materials" && <MaterialsTab studentId={profile.id} locked={locked} />}
       {active === "homework" && <HomeworkTab studentId={profile.id} locked={locked} />}
       {active === "interview" && <StudentInterviewTab studentId={profile.id} locked={locked} />}
+      {active === "aiwork" && (
+        hasAiWork ? (
+          <AiWorkTask studentId={profile.id} locked={locked} />
+        ) : !loading ? (
+          <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
+            공기업·사기업 면접 수업을 듣는 학생만 이용할 수 있습니다.
+          </p>
+        ) : null
+      )}
       {active === "chat" && <ChatTab studentId={profile.id} onRead={loadUnread} locked={locked} />}
       {active === "payments" && <PaymentsTab studentId={profile.id} />}
       {active === "notifications" && (
@@ -324,10 +358,23 @@ export default function StudentLayout() {
           </nav>
         ) : null}
 
-        <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-6 md:px-8">
+        {/* AI 직무역량은 과제·요청·AI 답을 나란히 봐야 해서 넓게 편다 */}
+        <main className={`mx-auto w-full flex-1 px-4 py-6 md:px-8 ${
+          active === "aiwork" && hasAiWork ? "max-w-6xl" : "max-w-3xl"
+        }`}>
           {renderContent()}
         </main>
       </div>
+
+      {/* 메뉴를 처음 눌렀을 때 한 번만 뜨는 안내 */}
+      {seenGuides && profile?.id && (
+        <GuideTour
+          userId={profile.id}
+          guideKey={active === "aiwork" && !hasAiWork ? null : active}
+          seen={seenGuides}
+          onDone={(next) => setSeenGuides(next)}
+        />
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import DebateSession from "./DebateSession";
 import UnivQuestionPicker from "./UnivQuestionPicker";
+import GuideTour from "../../components/GuideTour";
 import Simulation from "./Simulation";
 import MajorQuestions from "./MajorQuestions";
 import PtPractice from "./PtPractice";
@@ -392,6 +393,20 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const [loading, setLoading] = useState(true);
   const [assignment, setAssignment] = useState(null);
   const [activeTab, setActiveTab] = useState(null);
+  const [seenGuides, setSeenGuides] = useState(null);   // 탭 안내를 본 기록
+
+  // 탭별 처음 안내 — 어느 탭을 이미 봤는지 불러온다
+  useEffect(() => {
+    if (!studentId) return;
+    (async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("seen_guides")
+        .eq("id", studentId)
+        .maybeSingle();
+      setSeenGuides(data?.seen_guides ?? {});
+    })();
+  }, [studentId]);
   const [activeSeries, setActiveSeries] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
@@ -923,6 +938,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
               </p>
 
               <textarea
+                data-guide={i === 0 ? "iv-answer" : undefined}
                 value={t}
                 onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
                 rows={4}
@@ -949,6 +965,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                 )}
                 <button
                   type="button"
+                  data-guide={i === 0 ? "iv-save" : undefined}
                   onClick={() => saveAnswer(q)}
                   disabled={savingId === q.id || locked || submitted}
                   className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
@@ -1078,7 +1095,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       </div>
 
       {assignment.concept && (
-        <div className="no-print mb-4 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
+        <div data-guide="iv-concept" className="no-print mb-4 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
           <p className="text-[11px] font-black tracking-wide text-seum-blue">내 면접 컨셉</p>
           <p className="mt-0.5 text-base font-bold text-seum-navy">{assignment.concept}</p>
           <p className="mt-1 text-xs text-slate-500">
@@ -1093,7 +1110,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
         </div>
       )}
 
-      <div className="no-print mb-5 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
+      <div data-guide="iv-tabs" className="no-print mb-5 flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
         {tabs.map((t) => {
           const on = activeTab === t.key;
           return (
@@ -1153,7 +1170,9 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
       {/* 대입: 학교 → 학과 → 전형 드롭다운 */}
       {showUnivPicker && (
-        <UnivQuestionPicker studentId={studentId} value={univPick} onSelect={setUnivPick} />
+        <div data-guide="iv-univ">
+          <UnivQuestionPicker studentId={studentId} value={univPick} onSelect={setUnivPick} />
+        </div>
       )}
 
       {canPrint && (
@@ -1161,6 +1180,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
           <span className="text-xs text-slate-400">총 {questions.length}문항</span>
           <button
             type="button"
+            data-guide="iv-print"
             onClick={() => window.print()}
             className="rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
           >
@@ -1170,6 +1190,16 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       )}
 
       {renderBody()}
+
+      {/* 탭을 처음 눌렀을 때 한 번만 뜨는 안내 */}
+      {seenGuides && activeTab && !loadingQ && (
+        <GuideTour
+          userId={studentId}
+          guideKey={`iv-${activeTab}`}
+          seen={seenGuides}
+          onDone={(next) => setSeenGuides(next)}
+        />
+      )}
     </div>
   );
 }
