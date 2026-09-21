@@ -61,6 +61,7 @@ export const CATEGORIES = {
       { key: "insung", label: "기본 인성" },
       { key: "saenggibu", label: "생기부 예상질문" },
       { key: "gichul", label: "기출문제" },
+      { key: "speech", label: "스피치 훈련" },
       { key: "mock", label: "면접 모의고사" },
       { key: "simulation", label: "면접 시뮬레이션" },
       { key: "jamun", label: "제시문 면접" },
@@ -113,7 +114,7 @@ export function getStudentTabs(categoryKey) {
 // 그때부터는 이 기본값 대신 저장된 목록을 따른다.
 // ============================================================
 export const DEFAULT_OPEN_TABS = {
-  univ: ["insung"],   // 생기부는 선생님이 질문을 보낼 때 자동으로 열린다
+  univ: ["insung", "speech"],   // 생기부는 질문을 보낼 때 자동으로 열린다. 스피치 훈련은 완성한 답변이 생기면 채워진다
 };
 
 // 이 학생에게 열린 탭 키 목록

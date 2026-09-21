@@ -3,6 +3,8 @@ import { supabase } from "../../lib/supabase";
 import DebateSession from "./DebateSession";
 import UnivQuestionPicker from "./UnivQuestionPicker";
 import GuideTour from "../../components/GuideTour";
+import SpeechDrill from "./SpeechDrill";
+import SpeechTraining from "./SpeechTraining";
 import Simulation from "./Simulation";
 import MajorQuestions from "./MajorQuestions";
 import PtPractice from "./PtPractice";
@@ -24,6 +26,9 @@ const ANSWER_TABLE = "interview_answers_v2";
 
 // 한 문항당 연습 회차는 3차까지. 3차 뒤에 또 고치면 3차를 다시 쓴다.
 const MAX_ROUND = 3;
+
+// 스피치 연습을 붙이는 탭
+const SPEECH_TABS = ["insung", "saenggibu", "gichul"];
 
 // 선생님이 학생마다 따로 만드는 질문 탭
 const PERSONAL_TAB = "saenggibu";
@@ -395,6 +400,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const [assignment, setAssignment] = useState(null);
   const [activeTab, setActiveTab] = useState(null);
   const [seenGuides, setSeenGuides] = useState(null);   // 탭 안내를 본 기록
+  const [drillQ, setDrillQ] = useState(null);           // 스피치 연습 중인 질문
 
   // 탭별 처음 안내 — 어느 탭을 이미 봤는지 불러온다
   useEffect(() => {
@@ -520,6 +526,13 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       return;
     }
 
+    // 스피치 훈련은 자기 화면에서 완성한 답변을 모은다
+    if (tabKey === "speech") {
+      setQuestions([]);
+      setLoadingQ(false);
+      return;
+    }
+
     // 대입 기출문제는 별도 테이블(univ_questions)에서 조회
     if (categoryKey === "univ" && tabKey === "gichul") {
       await loadUnivGichul(univPick);
@@ -613,6 +626,55 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [studentId]);
+
+  // 답변 완성 — 지금 답변을 완성본으로 고정하고 스피치 연습을 연다
+  const completeAnswer = async (q) => {
+    const a = q._answer;
+    const text = (answers[q.id] ?? a?.student_answer ?? "").trim();
+    if (!a?.id || !text) return;
+    if (!window.confirm(
+      "이 답변을 완성본으로 정할까요?\n\n" +
+      "선생님께도 함께 전달되고, 이 답변으로 스피치 연습을 하게 됩니다.\n" +
+      "나중에 고치고 싶으면 [완성 취소]를 누르면 돼요."
+    )) return;
+
+    // 아직 전달하지 않은 고친 내용이 있으면 전달부터 한다
+    if (!isSubmitted(a, text)) {
+      try {
+        await persistAnswer(q.id, text, true);
+      } catch (e) {
+        return alert("전달 실패: " + e.message);
+      }
+    }
+
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from(ANSWER_TABLE)
+      .update({ completed_at: now, final_answer: text, updated_at: now })
+      .eq("id", a.id)
+      .select()
+      .maybeSingle();
+    if (error) return alert("저장 실패: " + error.message);
+    setQuestions((prev) =>
+      prev.map((x) => (x.id === q.id ? { ...x, _answer: { ...x._answer, ...data } } : x))
+    );
+  };
+
+  const uncompleteAnswer = async (q) => {
+    const a = q._answer;
+    if (!a?.id) return;
+    if (!window.confirm("완성을 취소할까요? 답변을 고친 뒤 다시 완성하면 됩니다.")) return;
+    const { data, error } = await supabase
+      .from(ANSWER_TABLE)
+      .update({ completed_at: null, updated_at: new Date().toISOString() })
+      .eq("id", a.id)
+      .select()
+      .maybeSingle();
+    if (error) return alert("저장 실패: " + error.message);
+    setQuestions((prev) =>
+      prev.map((x) => (x.id === q.id ? { ...x, _answer: { ...x._answer, ...data } } : x))
+    );
+  };
 
   // 회차 기록 — 선생님이 피드백을 준 뒤에 다시 저장하면 다음 회차가 열린다
   const syncRound = async (questionId, text, now) => {
@@ -820,6 +882,16 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const todayStr = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
 
   const renderBody = () => {
+    if (activeTab === "speech") {
+      return (
+        <SpeechTraining
+          studentId={studentId}
+          locked={locked}
+          onGoTab={(k) => { if (!isLocked(k)) setActiveTab(k); }}
+        />
+      );
+    }
+
     if (isSimulationTab) {
       return <Simulation studentId={studentId} locked={locked} />;
     }
@@ -1005,6 +1077,50 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
               ) : submitted ? (
                 <p className="no-print mt-3 text-xs text-slate-400">선생님 피드백을 기다리는 중이에요.</p>
               ) : null}
+
+              {/* 답변 완성 → 스피치 연습
+                  선생님 피드백을 받은 답변만 완성할 수 있고, 완성한 답변으로만 연습한다 */}
+              {SPEECH_TABS.includes(activeTab) && a?.id && a.teacher_feedback && (
+                a.completed_at ? (
+                  <div className="no-print mt-3 rounded-xl border border-green-200 bg-green-50/60 px-4 py-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm text-slate-600">
+                        <b className="text-green-700">✓ 완성한 답변</b>
+                        <span className="ml-2 text-xs text-slate-400">스피치 훈련에 올라갔어요</span>
+                      </p>
+                      <div className="flex shrink-0 gap-1.5">
+                        <button type="button" onClick={() => uncompleteAnswer(q)} disabled={locked}
+                          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-50 disabled:opacity-40">
+                          완성 취소
+                        </button>
+                        {!isLocked("speech") && (
+                          <button type="button" onClick={() => setActiveTab("speech")}
+                            className="rounded-lg bg-seum-navy px-3 py-1.5 text-xs font-bold text-white hover:bg-[#0d2647]">
+                            🎙 스피치 훈련으로
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {(a.final_answer ?? "").trim() !== (a.student_answer ?? "").trim() && (
+                      <p className="mt-1.5 text-[11px] text-amber-600">
+                        완성한 뒤에 답변을 고쳤어요. 스피치 훈련은 완성할 때의 답변으로 합니다.
+                        고친 답변으로 연습하려면 [완성 취소] 후 다시 완성하세요.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="no-print mt-3 flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 px-4 py-2.5">
+                    <p className="text-xs text-slate-500">
+                      피드백을 반영해 답변을 다 고쳤으면 완성하세요. 선생님께 전달되고 🎙 스피치 훈련 탭에 연습 문제로 올라가요.
+                    </p>
+                    <button type="button" onClick={() => completeAnswer(q)}
+                      disabled={locked || !t.trim()}
+                      className="shrink-0 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-green-700 disabled:opacity-40">
+                      ✓ 답변 완성
+                    </button>
+                  </div>
+                )
+              )}
 
               {/* 꼬리질문 — 선생님이 이 답변을 보고 이어서 물은 질문 */}
               {(childMap[q.id] ?? []).map((c) => {
@@ -1207,6 +1323,17 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       {renderBody()}
 
       {/* 탭을 처음 눌렀을 때 한 번만 뜨는 안내 */}
+      {/* 스피치 연습 창 */}
+      {drillQ && (
+        <SpeechDrill
+          studentId={studentId}
+          question={drillQ}
+          answer={drillQ._answer}
+          tabKey={activeTab}
+          onClose={() => setDrillQ(null)}
+        />
+      )}
+
       {/* 생기부는 질문이 온 뒤에 안내한다 (빈 탭에서 보고 지나가지 않게) */}
       {seenGuides && activeTab && !loadingQ &&
         !(activeTab === "saenggibu" && questions.length === 0) && (

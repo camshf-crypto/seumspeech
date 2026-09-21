@@ -1416,7 +1416,12 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                 </div>
               )}
 
-              {isMock ? (
+              {activeTab === "speech" ? (
+                <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-sm text-slate-400">
+                  학생이 [답변 완성]을 누른 답변으로 스피치 훈련을 합니다.
+                  <br />학생별 훈련 결과와 약점은 곧 여기에 표시됩니다.
+                </p>
+              ) : isMock ? (
                 <TeacherMockPanel
                   student={selStudent}
                   teacherId={myId}
