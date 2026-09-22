@@ -31,6 +31,7 @@ export default function AssignTab({ branchId }) {
   const [branches, setBranches] = useState([]);
   const [waiting, setWaiting] = useState([]);   // 가입만 하고 수강 등록이 없는 학생
   const [oneCourses, setOneCourses] = useState([]);   // 1:1 수업 목록
+  const [groups, setGroups] = useState([]);           // 단체반 — 반마다 담당 선생님
   const [pendCourse, setPendCourse] = useState("");   // 결제 전 학생 배정 때 고른 수업
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("none");   // none(미배정) | all
@@ -73,6 +74,15 @@ export default function AssignTab({ branchId }) {
       .order("title");
     setOneCourses(oc ?? []);
 
+    // 단체반 — 반을 먼저 만들고 나중에 담당을 붙인다. 결제 전 학생을 단체반으로 등록할 때도 쓴다.
+    const { data: gc } = await supabase
+      .from("courses")
+      .select("id, title, weekday, start_time, teacher_id, branch_id")
+      .eq("type", "group")
+      .eq("active", true)
+      .order("title");
+    setGroups(gc ?? []);
+
     // 가입 때 고른 과목 (enrollment_requests). 어떤 칸으로 학생과 이어지는지 몰라 넓게 맞춘다.
     const { data: reqs } = await supabase.from("enrollment_requests").select("*");
 
@@ -98,8 +108,17 @@ export default function AssignTab({ branchId }) {
         .filter((x) => !enrolled.has(x.id))
         .map((x) => {
           const r = findReq(x);
-          const want = r?.lesson_type === "oneonone" ? r?.lesson_detail : null;
-          const course = want ? (oc ?? []).find((c) => c.title === `1:1 ${want}`) : null;
+          const want = r?.lesson_detail ?? null;
+          // 1:1 은 "1:1 대입면접" 처럼 이름이 딱 맞는다.
+          // 단체반은 반 이름이 제각각이라 과목 이름이 들어간 반을 찾는다. (같은 지점 반을 먼저)
+          let course = null;
+          if (want && r?.lesson_type === "oneonone") {
+            course = (oc ?? []).find((c) => c.title === `1:1 ${want}`);
+          } else if (want && r?.lesson_type === "group") {
+            const key = want.replace("반", "");
+            const cand = (gc ?? []).filter((c) => (c.title ?? "").includes(key));
+            course = cand.find((c) => c.branch_id === x.branch_id) ?? cand[0] ?? null;
+          }
           return { ...x, wantLesson: r?.lesson_detail ?? null, wantType: r?.lesson_type ?? null, defaultCourseId: course?.id ?? "" };
         })
         .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))
@@ -141,18 +160,51 @@ export default function AssignTab({ branchId }) {
   // 그 순간 선생님의 1:1 수업·수업 추가·학생 답변 화면에 뜬다.
   const enrollAndAssign = async (x, teacherId, courseId) => {
     if (!courseId) return alert("수업을 골라주세요.");
+    const group = groups.find((g) => g.id === courseId);
     setSavingId(x.id);
     const { error } = await supabase.from("enrollments").insert({
       student_id: x.id,
       course_id: courseId,
-      teacher_id: teacherId,
+      // 단체반은 반 담당 선생님을 따른다. 1:1 은 고른 선생님
+      teacher_id: group ? (group.teacher_id ?? teacherId) : teacherId,
       total_sessions: 0,
       remaining_sessions: 0,
     });
     if (error) { setSavingId(null); return alert("수강 등록 실패: " + error.message); }
+
+    // 담당이 없는 단체반이면, 고른 선생님을 그 반 담당으로 지정한다
+    if (group && !group.teacher_id && teacherId) {
+      const { error: gErr } = await supabase
+        .from("courses")
+        .update({ teacher_id: teacherId })
+        .eq("id", group.id);
+      if (gErr) alert("반 담당 지정 실패: " + gErr.message);
+    }
+
     await supabase.from("profiles").update({ assigned_teacher_id: teacherId }).eq("id", x.id);
     setSavingId(null);
     await load();   // 결제 전 → 수강 중 목록으로 옮겨간다
+  };
+
+  // 단체반 담당 지정 — 그 선생님의 [단체반 수업]에만 보인다
+  const assignGroup = async (g, teacherId) => {
+    const t = teachers.find((x) => x.id === teacherId);
+    const prev = teachers.find((x) => x.id === g.teacher_id);
+    const msg = !teacherId
+      ? `[${g.title}] 담당을 해제할까요?\n해제하면 어느 선생님 화면에도 보이지 않습니다.`
+      : prev
+      ? `[${g.title}] 담당을 ${prev.name} → ${t?.name}(으)로 바꿀까요?`
+      : `[${g.title}]을(를) ${t?.name} 선생님에게 맡길까요?`;
+    if (!window.confirm(msg)) return;
+
+    setSavingId(g.id);
+    const { error } = await supabase
+      .from("courses")
+      .update({ teacher_id: teacherId || null })
+      .eq("id", g.id);
+    setSavingId(null);
+    if (error) return alert("저장 실패: " + error.message);
+    setGroups((p) => p.map((x) => (x.id === g.id ? { ...x, teacher_id: teacherId || null } : x)));
   };
 
   // 가입만 한 학생 — 담당을 미리 적어둔다.
@@ -370,9 +422,66 @@ export default function AssignTab({ branchId }) {
         </div>
       )}
 
+      {/* 단체반 담당 */}
+      {groups.length > 0 && (
+        <div className="mt-8">
+          <p className="mb-1 text-sm font-bold text-seum-navy">
+            단체반 담당
+            {groups.some((g) => !g.teacher_id) && (
+              <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                담당 없음 {groups.filter((g) => !g.teacher_id).length}
+              </span>
+            )}
+          </p>
+          <p className="mb-2 text-xs text-slate-400">
+            담당을 정한 선생님의 [단체반 수업]에만 그 반이 보입니다. 담당이 없는 반은 아무에게도 보이지 않아요.
+          </p>
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            {groups.map((g, i) => (
+              <div key={g.id}
+                className={`flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center ${
+                  i > 0 ? "border-t border-slate-100" : ""
+                }`}>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-seum-navy">
+                    {g.title}
+                    {g.branch_id && (
+                      <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">
+                        {branchName(g.branch_id)}
+                      </span>
+                    )}
+                    {!g.teacher_id && (
+                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">담당 없음</span>
+                    )}
+                  </p>
+                  {g.start_time && (
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {["일", "월", "화", "수", "목", "금", "토"][g.weekday] ?? ""}요일 {g.start_time.slice(0, 5)}
+                    </p>
+                  )}
+                </div>
+                <select
+                  value={g.teacher_id ?? ""}
+                  onChange={(e) => assignGroup(g, e.target.value)}
+                  disabled={savingId === g.id}
+                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-seum-blue sm:w-44 ${
+                    g.teacher_id ? "border-slate-300 bg-white" : "border-amber-300 bg-amber-50"
+                  }`}
+                >
+                  <option value="">담당 선택...</option>
+                  {teachers.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <p className="mt-3 text-xs text-slate-400">
         선생님을 고르면 확인 창이 뜨고, 확인해야 저장됩니다. [결제 전] 학생은 담당을 미리 정해두면 결제하는 순간 그 선생님에게 자동으로 배정됩니다.
-        단체반 담당은 [반/수업 개설]에서 반마다 지정하세요.
+        단체반은 아래 [단체반 담당]에서 반마다 지정합니다.
       </p>
 
       {/* ===== 배정 확인 ===== */}
@@ -447,10 +556,40 @@ export default function AssignTab({ branchId }) {
                       pendCourse ? "border-slate-300" : "border-amber-300 bg-amber-50"
                     }`}>
                     <option value="">수업 선택...</option>
-                    {oneCourses.map((c) => (
-                      <option key={c.id} value={c.id}>{c.title}</option>
-                    ))}
+                    <optgroup label="1:1">
+                      {oneCourses.map((c) => (
+                        <option key={c.id} value={c.id}>{c.title}</option>
+                      ))}
+                    </optgroup>
+                    {groups.length > 0 && (
+                      <optgroup label="단체반">
+                        {groups.map((g) => {
+                          const gt = teachers.find((x) => x.id === g.teacher_id);
+                          return (
+                            <option key={g.id} value={g.id}>
+                              {g.title}{g.branch_id ? ` · ${branchName(g.branch_id)}` : ""}{gt ? ` (${gt.name})` : " (담당 없음)"}
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    )}
                   </select>
+                  {(() => {
+                    const g = groups.find((x) => x.id === pendCourse);
+                    if (!g) return null;
+                    const gt = teachers.find((x) => x.id === g.teacher_id);
+                    const picked = teachers.find((x) => x.id === pending.teacherId);
+                    return gt ? (
+                      <p className="mt-1.5 text-[11px] text-seum-blue">
+                        이 반의 담당은 {gt.name} 선생님이에요. 학생은 {gt.name} 선생님 화면에 보입니다.
+                        {gt.id !== pending.teacherId && " 단체반은 반 담당 선생님을 따르므로, 위에서 고른 선생님 대신 반 담당으로 들어가요."}
+                      </p>
+                    ) : (
+                      <p className="mt-1.5 text-[11px] text-seum-blue">
+                        이 반은 아직 담당이 없어요. 배정하면 {picked?.name} 선생님이 이 반의 담당이 됩니다.
+                      </p>
+                    );
+                  })()}
                   <p className="mt-1.5 text-[11px] text-slate-400">
                     {pending.target.wantLesson
                       ? `가입할 때 [${pending.target.wantType === "group" ? "단체반" : "1:1"} ${pending.target.wantLesson}]을(를) 골랐어요.`
