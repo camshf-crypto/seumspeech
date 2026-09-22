@@ -282,7 +282,12 @@ export default function AdminScheduleTab() {
                     {b.start_time?.slice(0, 5)}{b.end_time ? `~${b.end_time.slice(0, 5)}` : ""} · {b.student?.name ?? b.course?.title ?? "수업"}
                     {badge ? <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[11px] font-bold ${badge.cls}`}>{badge.label}</span> : null}
                     {rm && rm.remainAfter != null ? (
-                      <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-bold text-seum-blue">{rm.remainAfter}/{rm.total}회</span>
+                      // 총 횟수가 0이면 결제 전 — 숫자 대신 '횟수 미정' (그대로 두면 -1/0회로 보인다)
+                      rm.total > 0 ? (
+                        <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-bold text-seum-blue">{rm.remainAfter}/{rm.total}회</span>
+                      ) : (
+                        <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-700">횟수 미정</span>
+                      )
                     ) : null}
                   </p>
                   <p className="mt-0.5 text-[11px] text-slate-400">

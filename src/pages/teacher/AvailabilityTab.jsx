@@ -450,7 +450,12 @@ export default function AvailabilityTab() {
                       {b.course_id && !b.student_id ? <span className="ml-1 text-[11px] text-slate-400">(단체반)</span> : null}
                       {badge ? <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[11px] font-bold ${badge.cls}`}>{badge.label}</span> : null}
                       {rm && rm.remainAfter != null ? (
-                        <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-bold text-seum-blue">{rm.remainAfter}/{rm.total}회</span>
+                        // 총 횟수가 0이면 결제 전 — 숫자 대신 '횟수 미정' (그대로 두면 -1/0회로 보인다)
+                        rm.total > 0 ? (
+                          <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-bold text-seum-blue">{rm.remainAfter}/{rm.total}회</span>
+                        ) : (
+                          <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-700">횟수 미정</span>
+                        )
                       ) : null}
                     </p>
                     {b.memo ? <p className="mt-0.5 truncate text-xs text-slate-500">{b.memo}</p> : null}

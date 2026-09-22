@@ -30,6 +30,8 @@ export default function AssignTab({ branchId }) {
   const [teachers, setTeachers] = useState([]);
   const [branches, setBranches] = useState([]);
   const [waiting, setWaiting] = useState([]);   // 가입만 하고 수강 등록이 없는 학생
+  const [oneCourses, setOneCourses] = useState([]);   // 1:1 수업 목록
+  const [pendCourse, setPendCourse] = useState("");   // 결제 전 학생 배정 때 고른 수업
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("none");   // none(미배정) | all
   const [showExpired, setShowExpired] = useState(false);
@@ -62,6 +64,18 @@ export default function AssignTab({ branchId }) {
     // 1:1 수업만
     setRows((enr ?? []).filter((e) => e.courses?.type === "oneonone"));
 
+    // 1:1 수업 — 결제 전 학생을 배정할 때 수강 등록을 만들 수업
+    const { data: oc } = await supabase
+      .from("courses")
+      .select("id, title")
+      .eq("type", "oneonone")
+      .eq("active", true)
+      .order("title");
+    setOneCourses(oc ?? []);
+
+    // 가입 때 고른 과목 (enrollment_requests). 어떤 칸으로 학생과 이어지는지 몰라 넓게 맞춘다.
+    const { data: reqs } = await supabase.from("enrollment_requests").select("*");
+
     // 가입했지만 수강 등록이 하나도 없는 학생
     const enrolled = new Set((enr ?? []).map((e) => e.student_id));
     // (profiles 에 created_at 이 없을 수도 있어 * 로 받고 여기서 정렬한다)
@@ -70,9 +84,24 @@ export default function AssignTab({ branchId }) {
       .select("*")
       .eq("role", "student");
     if (stErr) console.error("학생 조회 실패:", stErr);
+    const digits = (v) => String(v ?? "").replace(/\D/g, "");
+    const findReq = (x) =>
+      (reqs ?? [])
+        .filter((r) =>
+          [r.student_id, r.user_id, r.profile_id].includes(x.id) ||
+          (x.phone && digits(r.phone) && digits(r.phone) === digits(x.phone))
+        )
+        .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))[0];
+
     setWaiting(
       (st ?? [])
         .filter((x) => !enrolled.has(x.id))
+        .map((x) => {
+          const r = findReq(x);
+          const want = r?.lesson_type === "oneonone" ? r?.lesson_detail : null;
+          const course = want ? (oc ?? []).find((c) => c.title === `1:1 ${want}`) : null;
+          return { ...x, wantLesson: r?.lesson_detail ?? null, wantType: r?.lesson_type ?? null, defaultCourseId: course?.id ?? "" };
+        })
         .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))
     );
     setTeachers(tc ?? []);
@@ -106,6 +135,24 @@ export default function AssignTab({ branchId }) {
           : r
       )
     );
+  };
+
+  // 결제 전 학생 배정 — 수강 등록을 만들고 담당을 넣는다. (횟수 0, 결제는 나중에)
+  // 그 순간 선생님의 1:1 수업·수업 추가·학생 답변 화면에 뜬다.
+  const enrollAndAssign = async (x, teacherId, courseId) => {
+    if (!courseId) return alert("수업을 골라주세요.");
+    setSavingId(x.id);
+    const { error } = await supabase.from("enrollments").insert({
+      student_id: x.id,
+      course_id: courseId,
+      teacher_id: teacherId,
+      total_sessions: 0,
+      remaining_sessions: 0,
+    });
+    if (error) { setSavingId(null); return alert("수강 등록 실패: " + error.message); }
+    await supabase.from("profiles").update({ assigned_teacher_id: teacherId }).eq("id", x.id);
+    setSavingId(null);
+    await load();   // 결제 전 → 수강 중 목록으로 옮겨간다
   };
 
   // 가입만 한 학생 — 담당을 미리 적어둔다.
@@ -287,7 +334,7 @@ export default function AssignTab({ branchId }) {
                   <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-seum-blue">결제 전</span>
                 </p>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  수강 등록 없음
+                  {x.wantLesson ? `희망: ${x.wantLesson}` : "수강 등록 없음"}
                   {x.created_at && (
                     <>
                       <span className="mx-1.5 text-slate-300">·</span>
@@ -297,9 +344,17 @@ export default function AssignTab({ branchId }) {
                   {x.phone ? <span className="ml-1.5 text-slate-400">{x.phone}</span> : null}
                 </p>
               </div>
+              {/* 담당은 이미 정해뒀는데 수강 등록이 없는 학생 — 같은 선생님으로 등록만 */}
+              {x.assigned_teacher_id && (
+                <button type="button"
+                  onClick={() => { setPendCourse(x.defaultCourseId || ""); setPending({ kind: "wait", target: { ...x, assigned_teacher_id: null }, teacherId: x.assigned_teacher_id }); }}
+                  className="shrink-0 rounded-lg bg-seum-blue px-3 py-2 text-xs font-bold text-white hover:bg-[#2a63c4]">
+                  수업 등록
+                </button>
+              )}
               <select
                 value={x.assigned_teacher_id ?? ""}
-                onChange={(e) => setPending({ kind: "wait", target: x, teacherId: e.target.value })}
+                onChange={(e) => { setPendCourse(x.defaultCourseId || ""); setPending({ kind: "wait", target: x, teacherId: e.target.value }); }}
                 disabled={savingId === x.id}
                 className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-seum-blue sm:w-44 ${
                   x.assigned_teacher_id ? "border-slate-300 bg-white" : "border-amber-300 bg-amber-50"
@@ -332,9 +387,11 @@ export default function AssignTab({ branchId }) {
 
         const ok = async () => {
           const p2 = pending;
+          if (p2.kind === "wait" && !clearing && !pendCourse) return alert("수업을 골라주세요.");
           setPending(null);
           if (p2.kind === "enr") await assign(p2.target, p2.teacherId);
-          else await preAssign(p2.target, p2.teacherId);
+          else if (clearing) await preAssign(p2.target, "");
+          else await enrollAndAssign(p2.target, p2.teacherId, pendCourse);
         };
 
         return (
@@ -377,11 +434,31 @@ export default function AssignTab({ branchId }) {
                 <p className="mt-2 text-xs leading-relaxed text-slate-500">
                   {clearing
                     ? "해제하면 이 학생이 선생님 화면에서 사라집니다."
-                    : isEnr
-                    ? `저장하면 ${t?.name} 선생님의 [1:1 수업]과 수업 추가 목록에 바로 나타납니다.`
-                    : `결제해서 수강 등록이 생기는 순간 ${t?.name} 선생님에게 자동으로 배정됩니다.`}
+                    : `저장하면 ${t?.name} 선생님의 [1:1 수업]과 수업 추가 목록에 바로 나타납니다.`}
                 </p>
               </div>
+
+              {/* 결제 전 학생 — 어느 수업으로 등록할지 */}
+              {!isEnr && !clearing && (
+                <div className="mt-4 border-t border-slate-200 pt-4">
+                  <p className="text-xs font-bold text-slate-400">수업</p>
+                  <select value={pendCourse} onChange={(e) => setPendCourse(e.target.value)}
+                    className={`mt-1 w-full border px-3 py-2 text-sm outline-none focus:border-seum-blue ${
+                      pendCourse ? "border-slate-300" : "border-amber-300 bg-amber-50"
+                    }`}>
+                    <option value="">수업 선택...</option>
+                    {oneCourses.map((c) => (
+                      <option key={c.id} value={c.id}>{c.title}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-[11px] text-slate-400">
+                    {pending.target.wantLesson
+                      ? `가입할 때 [${pending.target.wantType === "group" ? "단체반" : "1:1"} ${pending.target.wantLesson}]을(를) 골랐어요.`
+                      : "가입할 때 고른 과목을 찾지 못했어요. 직접 골라주세요."}
+                    {" "}횟수 0회로 등록되고, 결제가 들어오면 수강생 관리에서 횟수를 넣어주세요.
+                  </p>
+                </div>
+              )}
 
               <div className="mt-5 flex gap-2 border-t border-slate-200 pt-4">
                 <button type="button" onClick={() => setPending(null)}

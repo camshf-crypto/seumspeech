@@ -289,11 +289,9 @@ export default function TeacherClassInterview({ courseType = "group" }) {
 
       if (myId) {
         if (courseType === "group") {
-          // 단체반: 수업 자체에 담당 선생님이 지정돼 있다.
-          const mine = list.filter(
-            (c) => c.course.teacher_id === myId || c.course.teacher_id == null
-          );
-          if (mine.length > 0) list = mine;
+          // 단체반: 반마다 담당 선생님이 지정돼 있다. 내가 담당인 반만 보인다.
+          // (예전에는 담당이 빈 반과, 맡은 반이 없을 때 전체 반까지 보여서 다른 선생님 반이 섞였다)
+          list = list.filter((c) => c.course.teacher_id === myId);
         } else {
           // 1:1: 수업은 전 선생님 공용이고, 담당은 enrollments.teacher_id 로 정해진다.
           const { data: myEnr, error: enrErr } = await supabase
@@ -1194,7 +1192,9 @@ export default function TeacherClassInterview({ courseType = "group" }) {
         <p className="mb-2 text-sm font-medium text-slate-500">{MODE_LABEL} 선택</p>
         {classes.length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-300 py-8 text-center text-sm text-slate-400">
-            면접 카테고리가 배정된 {MODE_LABEL}이(가) 없습니다. (어드민 &gt; 면접설정에서 배정)
+            {courseType === "group"
+              ? "담당으로 지정된 단체반이 없습니다. 원장님께 반 담당 지정을 요청하세요."
+              : "담당으로 배정된 1:1 학생이 없습니다. 원장님께 학생 배정을 요청하세요."}
           </p>
         ) : (
           <div data-guide="ti-class" className="flex flex-wrap gap-2">
