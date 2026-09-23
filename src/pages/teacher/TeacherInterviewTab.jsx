@@ -3,6 +3,7 @@ import { supabase } from "../../lib/supabase";
 import PtReview from "./PtReview";
 import TeacherMockPanel from "./TeacherMockPanel";
 import GuideTour from "../../components/GuideTour";
+import ConceptMaker from "./ConceptMaker";
 import {
   getCategory,
   getSubLabel,
@@ -224,6 +225,8 @@ export default function TeacherClassInterview({ courseType = "group" }) {
   const [conceptSaving, setConceptSaving] = useState(false);
 
   // 학생에게 열어준 탭 (null = 기본값을 따른다)
+  const [conceptMaker, setConceptMaker] = useState(false);   // 컨셉 만들기 창
+
   const [openTabs, setOpenTabs] = useState(null);
   const [tabSaving, setTabSaving] = useState(null);   // 저장 중인 탭 키
 
@@ -1275,6 +1278,14 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                   />
                   <button
                     type="button"
+                    onClick={() => setConceptMaker(true)}
+                    title="학과·진로·생기부 활동으로 컨셉 후보를 뽑습니다"
+                    className="shrink-0 rounded-lg border border-seum-blue px-3 py-2 text-sm font-bold text-seum-blue hover:bg-blue-50"
+                  >
+                    ✨ 컨셉 만들기
+                  </button>
+                  <button
+                    type="button"
                     onClick={saveConcept}
                     disabled={conceptSaving || !conceptDirty}
                     className="shrink-0 rounded-lg bg-seum-blue px-4 py-2 text-sm font-bold text-white hover:bg-[#2a63c4] disabled:opacity-50"
@@ -1820,6 +1831,16 @@ export default function TeacherClassInterview({ courseType = "group" }) {
             </>
           )}
         </>
+      )}
+
+      {/* 컨셉 만들기 */}
+      {conceptMaker && selStudent && (
+        <ConceptMaker
+          student={selStudent}
+          univPicks={univPicks}
+          onPick={(job) => { setConcept(job); setConceptMaker(false); }}
+          onClose={() => setConceptMaker(false)}
+        />
       )}
 
       {/* 탭을 처음 눌렀을 때 한 번만 뜨는 안내 */}

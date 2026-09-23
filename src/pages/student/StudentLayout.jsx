@@ -9,7 +9,7 @@ import ChatTab from "./ChatTab";
 import NotificationsTab from "./NotificationsTab";
 import StudentInterviewTab from "./StudentInterviewTab";
 import AbsenceRequestTab from "./AbsenceRequestTab";
-import AiWorkTask from "./AiWorkTask";
+import AiWorkHome from "./AiWorkHome";
 import GuideTour from "../../components/GuideTour";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -171,11 +171,14 @@ export default function StudentLayout() {
 
   const current = MENUS.find((m) => m.key === active);
 
+  // AI 직무역량 화면은 자체 여백·높이를 가지므로 바깥 여백 없이 꽉 채운다
+  const aiworkFull = active === "aiwork" && hasAiWork;
+
   // 메인 콘텐츠
   const renderContent = () => (
     <>
       {locked && (
-        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-100 px-4 py-3">
+        <div className={`rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 ${aiworkFull ? "m-4 md:mx-6" : "mb-4"}`}>
           <p className="text-sm font-bold text-slate-700">수강이 종료되었습니다</p>
           <p className="mt-0.5 text-xs text-slate-500">지난 자료는 계속 확인하실 수 있지만, 새로운 제출·전송은 재등록 후 이용하실 수 있습니다.</p>
         </div>
@@ -248,7 +251,7 @@ export default function StudentLayout() {
       {active === "interview" && <StudentInterviewTab studentId={profile.id} locked={locked} />}
       {active === "aiwork" && (
         hasAiWork ? (
-          <AiWorkTask studentId={profile.id} locked={locked} />
+          <AiWorkHome />
         ) : !loading ? (
           <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
             공기업·사기업 면접 수업을 듣는 학생만 이용할 수 있습니다.
@@ -301,7 +304,7 @@ export default function StudentLayout() {
         </div>
       </aside>
 
-      <div className="flex w-full flex-col">
+      <div className="flex w-full min-w-0 flex-col">
         <header className="border-b border-slate-200 bg-white px-4 py-3 md:px-8">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -358,9 +361,9 @@ export default function StudentLayout() {
           </nav>
         ) : null}
 
-        {/* AI 직무역량은 과제·요청·AI 답을 나란히 봐야 해서 넓게 편다 */}
-        <main className={`mx-auto w-full flex-1 px-4 py-6 md:px-8 ${
-          active === "aiwork" && hasAiWork ? "max-w-6xl" : "max-w-3xl"
+        {/* AI 직무역량은 과제·답안·AI를 나란히 봐야 해서 화면을 꽉 채운다 (여백은 각 화면이 가짐) */}
+        <main className={`w-full flex-1 ${
+          aiworkFull ? "" : "mx-auto max-w-3xl px-4 py-6 md:px-8"
         }`}>
           {renderContent()}
         </main>
