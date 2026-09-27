@@ -22,6 +22,7 @@ const FN_MAP = {
   gov: "interview-ai-gov",             // 공무원
   public_corp: "interview-ai-public",  // 공기업
   univ: "interview-ai-univ",           // 대입 (컨셉·활동매칭·스피치구조)
+  police: "interview-ai-police",       // 경찰 (평가요소 5개, 항목당 10점)
   // company: "interview-ai-company",     // 사기업 (미배포)
   // hospital: "interview-ai-hospital",   // 병원 (미배포)
   // transfer: "interview-ai-transfer",   // 편입 (미배포)
@@ -50,9 +51,17 @@ const TAB_FN_MAP = {
   gichul: "interview-ai-gichul",         // 기출 — 학교별 평가요소
 };
 
+// 탭별 전용 함수(생기부·기출)를 쓰지 않고, 면접 종류 함수 하나로 보는 카테고리
+// 경찰 — 인성·기출 모두 경찰 평가요소 5개로 본다
+const CATEGORY_ONLY_FN = ["police"];
+
 function getFnName(categoryKey, tabKey) {
+  if (CATEGORY_ONLY_FN.includes(categoryKey)) return FN_MAP[categoryKey] ?? FN_FALLBACK;
   return TAB_FN_MAP[tabKey] ?? FN_MAP[categoryKey] ?? FN_FALLBACK;
 }
+
+// 기출 계열을 부르는 말 — 공무원은 직렬, 경찰은 지방청
+const seriesWordOf = (categoryKey) => (categoryKey === "police" ? "지방청" : "직렬");
 
 // Edge Function 에러의 실제 응답 본문을 뽑아냄
 async function extractFnError(error) {
@@ -173,7 +182,7 @@ function hasHangul(value) {
 }
 
 function resolveSeriesLabel(categoryKey, subKey, key, dbLabel) {
-  if (key === NO_SERIES) return "직렬 미지정";
+  if (key === NO_SERIES) return `${seriesWordOf(categoryKey)} 미지정`;
 
   const cleanDbLabel = String(dbLabel ?? "").trim();
   if (hasHangul(cleanDbLabel)) return cleanDbLabel;
@@ -193,11 +202,11 @@ function resolveSeriesLabel(categoryKey, subKey, key, dbLabel) {
 // [면접 컨셉]
 // 선생님이 학생마다 적는 구체적인 진로 방향 (예: 소아암병동 간호사).
 // interview_assignments.concept 에 저장되고 학생 화면에도 보인다.
-// 대입 AI 피드백이 이 컨셉을 기준으로 답변을 본다.
+// 대입·경찰 AI 피드백이 이 컨셉을 참고해 답변을 본다.
 //
 // [기출문제 탭]
-// 학생이 자기 직렬을 골라 답변하므로, 그 학생이 답변한 문항의 series_key 로
-// 직렬을 역추적해서 자동 선택한다.
+// 학생이 자기 직렬(경찰은 지방청)을 골라 답변하므로, 그 학생이 답변한 문항의
+// series_key 로 계열을 역추적해서 자동 선택한다.
 //
 // [주의] interview_answers_v2 조회 시 question_id 를 .in(...) 으로 넘기지 말 것.
 // UUID가 전부 URL에 들어가 길이 한계를 넘고 서버가 400 으로 거절한다.
@@ -742,6 +751,8 @@ export default function TeacherClassInterview({ courseType = "group" }) {
   const isMock = activeTab === "mock";
   const unsentCount = isPersonal ? rows.filter((r) => !r.sent_at).length : 0;
   const isUniv = selClass?.assignment?.category_key === "univ";
+  const isPolice = selClass?.assignment?.category_key === "police";
+  const seriesWord = seriesWordOf(selClass?.assignment?.category_key);
 
   const seriesLabelMap = rows.reduce((acc, row) => {
     const key = row.series_key ?? NO_SERIES;
@@ -1294,9 +1305,9 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                   </button>
                 </div>
                 <p className="mt-1.5 text-[11px] text-slate-400">
-                  {isUniv
-                    ? "학생이 내세울 구체적인 진로 방향을 적으세요. AI가 이 컨셉을 기준으로 답변과 활동이 맞는지 봅니다."
-                    : "학생이 내세울 구체적인 진로 방향을 적으세요. 현재 AI 피드백은 대입 면접에서만 컨셉을 사용합니다."}
+                  {isUniv || isPolice
+                    ? "학생이 내세울 구체적인 진로 방향을 적으세요. AI가 이 컨셉을 참고해 답변을 봅니다."
+                    : "학생이 내세울 구체적인 진로 방향을 적으세요. 현재 AI 피드백은 대입·경찰 면접에서만 컨셉을 사용합니다."}
                 </p>
               </div>
 
@@ -1396,19 +1407,19 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                 </div>
               )}
 
-              {/* 기출 탭 — 직렬 */}
+              {/* 기출 탭 — 직렬(경찰은 지방청) */}
               {isGichul && !loading && rows.length > 0 && (
                 <div className="mb-4 rounded-xl bg-slate-50 p-3">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <p className="text-xs font-medium text-slate-500">
                       {studentSeries.length > 0
-                        ? `${selStudent.name} 학생이 답변한 직렬`
-                        : "이 학생은 아직 기출에 답변하지 않았습니다 · 직렬을 선택하세요"}
+                        ? `${selStudent.name} 학생이 답변한 ${seriesWord}`
+                        : `이 학생은 아직 기출에 답변하지 않았습니다 · ${seriesWord}을 선택하세요`}
                     </p>
                     {studentSeries.length > 0 && (
                       <button type="button" onClick={() => setShowAllSeries((v) => !v)}
                         className="shrink-0 text-xs font-medium text-seum-blue hover:underline">
-                        {showAllSeries ? "학생 직렬만" : "전체 직렬 보기"}
+                        {showAllSeries ? `학생 ${seriesWord}만` : `전체 ${seriesWord} 보기`}
                       </button>
                     )}
                   </div>
@@ -1491,7 +1502,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                 <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
                   {isGichul
                     ? rows.length > 0
-                      ? "위에서 직렬을 선택하세요."
+                      ? `위에서 ${seriesWord}을 선택하세요.`
                       : "이 탭에 등록된 기출문제가 없습니다."
                     : isUnivGichul
                     ? univPicks.length === 0
@@ -1690,7 +1701,9 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                               ) : (
                                 <p className="border-t border-slate-200 px-3 py-2.5 text-xs text-slate-400">
                                   {hasAnswer
-                                    ? "아직 분석하지 않았습니다. 컨셉·활동 매칭·스피치 구조를 확인하려면 AI 분석을 누르세요."
+                                    ? isPolice
+                                      ? "아직 분석하지 않았습니다. 경찰 평가요소 5개(50점)로 보려면 AI 분석을 누르세요."
+                                      : "아직 분석하지 않았습니다. 컨셉·활동 매칭·스피치 구조를 확인하려면 AI 분석을 누르세요."
                                     : "학생이 답변하면 AI 분석을 쓸 수 있습니다."}
                                 </p>
                               )}

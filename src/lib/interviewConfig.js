@@ -21,6 +21,23 @@ export const CATEGORIES = {
       { key: "debate", label: "토론" },
     ],
   },
+  // ============================================================
+  // 경찰공무원 — 공무원(gov)과 질문을 섞지 않도록 별도 카테고리
+  // 실제 면접: 발표면접 10분 + 경험·인성면접 15분
+  // 경험 질문은 기출문제(gichul)의 '공통' 계열에 넣는다.
+  // ============================================================
+  police: {
+    key: "police",
+    label: "경찰공무원",
+    subs: null,
+    tabs: [
+      { key: "insung", label: "기본 인성면접" },
+      { key: "gichul", label: "기출문제" },
+      { key: "pt", label: "발표면접" },
+      { key: "speech", label: "스피치 훈련" },
+      { key: "simulation", label: "면접 시뮬레이션" },
+    ],
+  },
   public_corp: {
     key: "public_corp",
     label: "공기업",
@@ -108,7 +125,7 @@ export function getStudentTabs(categoryKey) {
 // ============================================================
 // 학생에게 처음부터 열려 있는 탭
 // 여기 없는 탭은 잠겨 있다가 선생님이 열어줘야 보인다.
-// 카테고리가 목록에 없으면 모든 탭이 열려 있다. (공무원·공기업 등)
+// 카테고리가 목록에 없으면 모든 탭이 열려 있다. (공무원·경찰·공기업 등)
 //
 // 선생님이 학생별로 조절하면 interview_assignments.open_tabs 에 저장되고,
 // 그때부터는 이 기본값 대신 저장된 목록을 따른다.
@@ -130,6 +147,7 @@ export function getOpenTabKeys(categoryKey, savedOpenTabs) {
 // interview_questions_v2.series_key 값과 1:1 매칭
 //
 // - 공무원: 직렬. 개수가 적어 상수로 관리 (버튼 UI)
+// - 경찰:   지방청. 상수로 관리 (버튼 UI)
 // - 대입:   학교. 140개 이상이라 상수로 두지 않고 DB에서 조회 (드롭다운 UI)
 //           → SERIES_SOURCE로 구분한다.
 // ============================================================
@@ -187,6 +205,16 @@ export const GOV_SERIES = {
   ],
 };
 
+// 경찰 기출 — 지방청별. '공통'에는 지방청 구분 없는 질문과 경험 질문을 넣는다.
+export const POLICE_SERIES = [
+  { key: "gongtong", label: "공통·경험" },
+  { key: "seoul", label: "서울청" },
+  { key: "gyeonggi_nam", label: "경기남부청" },
+  { key: "gyeonggi_buk", label: "경기북부청" },
+  { key: "incheon", label: "인천청" },
+  { key: "busan", label: "부산청" },
+];
+
 // 카테고리별 series 정의
 // mode: "static" = 아래 목록 사용(버튼) / "db" = DB 조회(드롭다운)
 // tabs: series 선택이 필요한 탭 목록
@@ -197,6 +225,13 @@ export const SERIES_SOURCE = {
     ui: "buttons",
     pickerLabel: "직렬 선택",
     emptyHint: "직렬을 선택하면 해당 직렬의 기출문제가 표시됩니다.",
+  },
+  police: {
+    mode: "static",
+    tabs: ["gichul"],
+    ui: "buttons",
+    pickerLabel: "지방청 선택",
+    emptyHint: "지방청을 선택하면 해당 지방청의 기출문제가 표시됩니다.",
   },
   univ: {
     mode: "db",
@@ -246,6 +281,7 @@ export function getSeriesEmptyHint(categoryKey, tabKey) {
 // DB 조회형(대입 학교)은 빈 배열을 반환하며, 목록은 화면에서 조회한다.
 export function getSeries(categoryKey, subKey) {
   if (categoryKey === "gov") return GOV_SERIES[subKey] ?? [];
+  if (categoryKey === "police") return POLICE_SERIES;   // 경찰은 세부 없이 지방청 목록 하나
   return [];
 }
 
