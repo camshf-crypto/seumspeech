@@ -225,7 +225,12 @@ export default function AdminScheduleTab() {
     : "";
 
   // ===== 선택한 날짜 상세 (보기 전용) =====
-  const selSlots = selectedDate ? slotsOnDate(selectedDate) : [];
+  // 가능 시간은 시작 시간 순으로 정렬해서 보여준다
+  const selSlots = selectedDate
+    ? [...slotsOnDate(selectedDate)].sort((a, b) =>
+        (a.start_time ?? "").localeCompare(b.start_time ?? "")
+      )
+    : [];
   const selCourses = selectedDate ? coursesOnDate(selectedDate) : [];
   const selBookings = selectedDate ? bookingsOnDate(selectedDate) : [];
   const selConsults = selectedDate ? consultsOnDate(selectedDate) : [];
@@ -246,6 +251,26 @@ export default function AdminScheduleTab() {
           +
         </button>
       </div>
+
+      {/* 가능 시간 — 선생님이 수업 가능하다고 열어둔 시간. 수업보다 위에 둔다 */}
+      {selSlots.length > 0 && (
+        <div className="mb-4">
+          <p className="mb-1.5 text-xs font-bold text-purple-700">가능 시간</p>
+          <div className="space-y-1.5">
+            {selSlots.map((s) => (
+              <div key={s.id} className="rounded-lg bg-purple-50 px-3 py-2 text-sm">
+                <p className="font-medium text-purple-700">
+                  {s.start_time?.slice(0, 5)}{s.end_time ? `~${s.end_time.slice(0, 5)}` : ""}
+                  {s.teacher?.name ? ` · ${s.teacher.name}쌤` : ""}
+                </p>
+                {s.branch?.name && (
+                  <p className="mt-0.5 text-[11px] text-slate-400">{s.branch.name}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 방문상담 */}
       {selConsults.length > 0 && (
@@ -316,7 +341,7 @@ export default function AdminScheduleTab() {
         </div>
       )}
 
-      {selConsults.length === 0 && selBookings.length === 0 && selCourses.length === 0 && (
+      {selSlots.length === 0 && selConsults.length === 0 && selBookings.length === 0 && selCourses.length === 0 && (
         <p className="py-6 text-center text-sm text-slate-400">이 날 일정이 없습니다.</p>
       )}
 
