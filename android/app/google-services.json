@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "141829464274",
+    "project_id": "seumspeech-76140",
+    "storage_bucket": "seumspeech-76140.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:141829464274:android:12e90e87e3954aeb070d0b",
+        "android_client_info": {
+          "package_name": "com.seumlearning.seumspeech"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDEjkRHdmHK2ap2jmJ7Q11yO60hW5HGgTg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

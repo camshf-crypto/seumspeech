@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
+import { initNativePush } from "./lib/nativePush";
 import Header from "./components/Header";
 import InterviewHeader from "./components/interview/InterviewHeader";
 import FloatingQuick from "./components/FloatingQuick";
@@ -42,6 +44,13 @@ import StudentLayout from "./pages/student/StudentLayout";
 
 export default function App() {
   const { pathname } = useLocation();
+
+  // 앱(안드로이드)에서 열렸을 때 푸시 알림 등록 — 웹에서는 아무것도 안 함
+  // ⚠️ 아래 if 문들보다 반드시 위에 있어야 함 (중간 return 때문에)
+  useEffect(() => {
+    initNativePush();
+  }, []);
+
   const isIntro = pathname === "/";
 
   if (isIntro) {

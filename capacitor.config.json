@@ -1,0 +1,9 @@
+{
+  "appId": "com.seumlearning.seumspeech",
+  "appName": "세움스피치",
+  "webDir": "dist",
+  "server": {
+    "url": "https://seumspeech.vercel.app/login",
+    "cleartext": false
+  }
+}
