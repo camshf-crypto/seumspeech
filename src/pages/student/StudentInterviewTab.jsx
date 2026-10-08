@@ -35,6 +35,13 @@ const SPEECH_TABS = ["insung", "saenggibu", "gichul"];
 //   true  — 선생님 피드백을 받은 답변만 최종 완료할 수 있다
 const NEED_FEEDBACK_TO_FINISH = false;
 
+// 답변 칸은 글 길이에 맞춰 세로로 늘어난다 (스크롤 없이 전체가 보이게)
+const autoGrow = (el) => {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight + 2}px`;
+};
+
 // 선생님이 학생마다 따로 만드는 질문 탭
 const PERSONAL_TAB = "saenggibu";
 
@@ -1050,11 +1057,12 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
               <textarea
                 data-guide={i === 0 ? "iv-answer" : undefined}
                 value={t}
-                onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
-                rows={4}
+                onChange={(e) => { setAnswers((p) => ({ ...p, [q.id]: e.target.value })); autoGrow(e.target); }}
+                ref={autoGrow}
+                rows={8}
                 disabled={locked || finished}
                 placeholder={locked ? "수강 종료로 답변을 작성할 수 없습니다." : "답변을 작성하세요. 자동 저장됩니다."}
-                className="no-print w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue disabled:bg-slate-50 disabled:text-slate-500"
+                className="no-print min-h-[200px] w-full resize-y overflow-hidden rounded-lg border border-slate-300 px-3 py-2 text-sm leading-relaxed outline-none focus:border-seum-blue disabled:bg-slate-50 disabled:text-slate-500"
               />
 
               <div className="print-only print-answer">{t || " "}</div>
@@ -1176,11 +1184,12 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
                     <textarea
                       value={ct}
-                      onChange={(e) => setAnswers((p) => ({ ...p, [c.id]: e.target.value }))}
-                      rows={3}
+                      onChange={(e) => { setAnswers((p) => ({ ...p, [c.id]: e.target.value })); autoGrow(e.target); }}
+                      ref={autoGrow}
+                      rows={5}
                       disabled={locked}
                       placeholder={locked ? "수강 종료로 답변을 작성할 수 없습니다." : "답변을 작성하세요. 자동 저장됩니다."}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
+                      className="min-h-[130px] w-full resize-y overflow-hidden rounded-lg border border-slate-300 px-3 py-2 text-sm leading-relaxed outline-none focus:border-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
                     />
 
                     <div className="mt-2 flex items-center justify-between gap-2">
