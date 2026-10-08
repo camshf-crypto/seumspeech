@@ -27,8 +27,13 @@ const ANSWER_TABLE = "interview_answers_v2";
 // 한 문항당 연습 회차는 3차까지. 3차 뒤에 또 고치면 3차를 다시 쓴다.
 const MAX_ROUND = 3;
 
-// 스피치 연습을 붙이는 탭
+// 스피치 훈련에 올릴 수 있는 탭
 const SPEECH_TABS = ["insung", "saenggibu", "gichul"];
+
+// 최종 완료를 누르려면 선생님 피드백이 먼저 있어야 하는지
+//   false — 답변만 있으면 학생이 언제든 최종 완료할 수 있다
+//   true  — 선생님 피드백을 받은 답변만 최종 완료할 수 있다
+const NEED_FEEDBACK_TO_FINISH = false;
 
 // 선생님이 학생마다 따로 만드는 질문 탭
 const PERSONAL_TAB = "saenggibu";
@@ -418,6 +423,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [savingId, setSavingId] = useState(null);
+  const [finishingId, setFinishingId] = useState(null);   // 최종 완료 처리 중인 문항
   const [loadingQ, setLoadingQ] = useState(false);
   const [autoSavingIds, setAutoSavingIds] = useState({});
   const [autoSavedIds, setAutoSavedIds] = useState({});
@@ -526,7 +532,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
       return;
     }
 
-    // 스피치 훈련은 자기 화면에서 완성한 답변을 모은다
+    // 스피치 훈련은 자기 화면에서 최종 완료한 답변을 모은다
     if (tabKey === "speech") {
       setQuestions([]);
       setLoadingQ(false);
@@ -627,43 +633,57 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     return () => { supabase.removeChannel(channel); };
   }, [studentId]);
 
-  // 답변 완성 — 지금 답변을 완성본으로 고정하고 스피치 연습을 연다
+  // 최종 완료 — 지금 답변을 확정한다
+  //   선생님께 전달 + 답변 잠금 + 스피치 훈련에 연습 문제로 올라감
   const completeAnswer = async (q) => {
+    if (locked) return;
     const a = q._answer;
     const text = (answers[q.id] ?? a?.student_answer ?? "").trim();
-    if (!a?.id || !text) return;
+    if (!text) return alert("답변을 먼저 작성해주세요.");
     if (!window.confirm(
-      "이 답변을 완성본으로 정할까요?\n\n" +
-      "선생님께도 함께 전달되고, 이 답변으로 스피치 연습을 하게 됩니다.\n" +
-      "나중에 고치고 싶으면 [완성 취소]를 누르면 돼요."
+      "이 답변으로 최종 완료할까요?\n\n" +
+      "· 선생님께 전달되고\n" +
+      "· 🎙 스피치 훈련에 연습 문제로 올라가요\n" +
+      "· 완료하면 답변이 잠겨요. 고치고 싶으면 [다시 고치기]를 누르면 돼요."
     )) return;
 
-    // 아직 전달하지 않은 고친 내용이 있으면 전달부터 한다
-    if (!isSubmitted(a, text)) {
-      try {
-        await persistAnswer(q.id, text, true);
-      } catch (e) {
-        return alert("전달 실패: " + e.message);
+    setFinishingId(q.id);
+    try {
+      // 아직 전달하지 않은 내용이 있으면 전달부터 한다 (답변 줄이 없으면 이때 생긴다)
+      let row = a;
+      if (!row?.id || !isSubmitted(row, text)) {
+        row = await persistAnswer(q.id, text, true);
+        setAnswers((p) => ({ ...p, [q.id]: text }));
       }
-    }
 
-    const now = new Date().toISOString();
-    const { data, error } = await supabase
-      .from(ANSWER_TABLE)
-      .update({ completed_at: now, final_answer: text, updated_at: now })
-      .eq("id", a.id)
-      .select()
-      .maybeSingle();
-    if (error) return alert("저장 실패: " + error.message);
-    setQuestions((prev) =>
-      prev.map((x) => (x.id === q.id ? { ...x, _answer: { ...x._answer, ...data } } : x))
-    );
+      const now = new Date().toISOString();
+      const { data, error } = await supabase
+        .from(ANSWER_TABLE)
+        .update({ completed_at: now, final_answer: text, updated_at: now })
+        .eq("id", row.id)
+        .select()
+        .maybeSingle();
+      if (error) throw error;
+      setQuestions((prev) =>
+        prev.map((x) => (x.id === q.id ? { ...x, _answer: { ...x._answer, ...data } } : x))
+      );
+    } catch (e) {
+      alert("최종 완료 실패: " + e.message);
+    } finally {
+      setFinishingId(null);
+    }
   };
 
+  // 다시 고치기 — 잠금을 풀고 스피치 훈련에서 "고치는 중"으로 내린다 (연습 기록은 남는다)
   const uncompleteAnswer = async (q) => {
     const a = q._answer;
     if (!a?.id) return;
-    if (!window.confirm("완성을 취소할까요? 답변을 고친 뒤 다시 완성하면 됩니다.")) return;
+    if (!window.confirm(
+      "답변을 다시 고칠까요?\n\n" +
+      "· 스피치 훈련에서 '고치는 중'으로 바뀌고 연습이 잠겨요\n" +
+      "· 고친 뒤 다시 [최종 완료]를 누르면 새 답변으로 1단계부터 연습해요\n" +
+      "· 지금까지 연습한 기록은 그대로 남아요"
+    )) return;
     const { data, error } = await supabase
       .from(ANSWER_TABLE)
       .update({ completed_at: null, updated_at: new Date().toISOString() })
@@ -776,6 +796,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
     ) return;
     const timer = setTimeout(async () => {
       const targets = questionsRef.current.filter((q) => {
+        if (q._answer?.completed_at) return false; // 최종 완료한 답변은 잠겨 있다
         const t = answers[q.id] ?? "";
         const saved = q._answer?.student_answer ?? "";
         return t.trim() !== "" && t !== saved;
@@ -999,19 +1020,31 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
           const grades = fb ? parseGrades(fb) : null;
           const fbText = grades ? stripDiagnosis(fb) : fb;
           const t = answers[q.id] ?? "";
-          const dirty = t !== (a?.student_answer ?? "");
           const submitted = isSubmitted(a, t);
+          const finished = !!a?.completed_at;          // 최종 완료 → 답변 잠금
+          const canFinish =
+            SPEECH_TABS.includes(activeTab) &&
+            (!NEED_FEEDBACK_TO_FINISH || !!a?.teacher_feedback);
+          // 최종 완료 뒤에 선생님이 고쳐준 답변이 새로 왔는지
+          const newTeacherAnswer =
+            finished && a?.teacher_answer &&
+            a.teacher_answer.trim() !== (a.final_answer ?? "").trim();
 
           return (
             <div
               key={q.id}
               className={`print-card rounded-xl border bg-white p-4 transition ${
-                submitted ? "border-green-200" : "border-slate-200"
+                finished ? "border-green-300" : submitted ? "border-green-200" : "border-slate-200"
               }`}
             >
               <p className="mb-2 font-medium text-seum-navy">
                 <span className="mr-1 text-slate-400">{i + 1}.</span>
                 {q.question}
+                {finished && (
+                  <span className="ml-2 inline-block rounded bg-green-100 px-1.5 py-0.5 align-middle text-[10px] font-black text-green-700">
+                    최종 완료
+                  </span>
+                )}
               </p>
 
               <textarea
@@ -1019,45 +1052,48 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                 value={t}
                 onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
                 rows={4}
-                disabled={locked}
+                disabled={locked || finished}
                 placeholder={locked ? "수강 종료로 답변을 작성할 수 없습니다." : "답변을 작성하세요. 자동 저장됩니다."}
-                className="no-print w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue disabled:bg-slate-50 disabled:text-slate-400"
+                className="no-print w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue disabled:bg-slate-50 disabled:text-slate-500"
               />
 
               <div className="print-only print-answer">{t || " "}</div>
 
-              <div className="no-print mt-2 flex items-center justify-between gap-2">
-                {submitted ? (
-                  <span className="text-xs font-bold text-green-600">✓ 선생님께 전달됨</span>
-                ) : autoSavingIds[q.id] ? (
-                  <span className="text-xs text-slate-400">저장 중...</span>
-                ) : autoSavedIds[q.id] ? (
-                  <span className="text-xs text-blue-600">임시 저장됨 — 저장을 눌러 전달하세요</span>
-                ) : t.trim() ? (
-                  <span className="text-xs text-amber-500">
-                    {a?.submitted_at ? "수정됨 — 다시 전달하세요" : "저장을 눌러 선생님께 전달하세요"}
-                  </span>
-                ) : (
-                  <span className="text-xs text-slate-400">미작성</span>
-                )}
-                <button
-                  type="button"
-                  data-guide={i === 0 ? "iv-save" : undefined}
-                  onClick={() => saveAnswer(q)}
-                  disabled={savingId === q.id || locked || submitted}
-                  className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
-                    submitted ? "cursor-default bg-green-600" : "bg-seum-blue hover:bg-[#2a63c4]"
-                  }`}
-                >
-                  {savingId === q.id
-                    ? "저장 중..."
-                    : submitted
-                    ? "✓ 전달 완료"
-                    : a?.submitted_at
-                    ? "다시 전달"
-                    : "저장"}
-                </button>
-              </div>
+              {/* 최종 완료 전: 저장(전달) 줄 */}
+              {!finished && (
+                <div className="no-print mt-2 flex items-center justify-between gap-2">
+                  {submitted ? (
+                    <span className="text-xs font-bold text-green-600">✓ 선생님께 전달됨</span>
+                  ) : autoSavingIds[q.id] ? (
+                    <span className="text-xs text-slate-400">저장 중...</span>
+                  ) : autoSavedIds[q.id] ? (
+                    <span className="text-xs text-blue-600">임시 저장됨 — 저장을 눌러 전달하세요</span>
+                  ) : t.trim() ? (
+                    <span className="text-xs text-amber-500">
+                      {a?.submitted_at ? "수정됨 — 다시 전달하세요" : "저장을 눌러 선생님께 전달하세요"}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400">미작성</span>
+                  )}
+                  <button
+                    type="button"
+                    data-guide={i === 0 ? "iv-save" : undefined}
+                    onClick={() => saveAnswer(q)}
+                    disabled={savingId === q.id || locked || submitted}
+                    className={`shrink-0 rounded-lg px-4 py-1.5 text-sm font-bold text-white transition disabled:opacity-100 ${
+                      submitted ? "cursor-default bg-green-600" : "bg-seum-blue hover:bg-[#2a63c4]"
+                    }`}
+                  >
+                    {savingId === q.id
+                      ? "저장 중..."
+                      : submitted
+                      ? "✓ 전달 완료"
+                      : a?.submitted_at
+                      ? "다시 전달"
+                      : "저장"}
+                  </button>
+                </div>
+              )}
 
               {/* 선생님이 고쳐준 답변 — 내 답변은 그대로 두고 따로 보여준다 */}
               {a?.teacher_answer ? (
@@ -1067,31 +1103,33 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                     {a.teacher_answer}
                   </p>
                   <p className="mt-2 text-[11px] text-slate-500">
-                    내 답변과 비교해보고, 위 칸을 직접 고쳐 쓰면서 연습해보세요.
+                    {finished
+                      ? "이 답변을 반영하고 싶으면 아래 [다시 고치기]를 눌러 고친 뒤 다시 최종 완료하세요."
+                      : "내 답변과 비교해보고, 위 칸을 직접 고쳐 쓰면서 연습해보세요."}
                   </p>
                 </div>
               ) : null}
 
               {fb ? (
                 <FeedbackAccordion grades={grades} text={fbText} />
-              ) : submitted ? (
+              ) : submitted && !finished ? (
                 <p className="no-print mt-3 text-xs text-slate-400">선생님 피드백을 기다리는 중이에요.</p>
               ) : null}
 
-              {/* 답변 완성 → 스피치 연습
-                  선생님 피드백을 받은 답변만 완성할 수 있고, 완성한 답변으로만 연습한다 */}
-              {SPEECH_TABS.includes(activeTab) && a?.id && a.teacher_feedback && (
-                a.completed_at ? (
+              {/* 최종 완료 → 스피치 훈련
+                  최종 완료한 답변만 스피치 훈련에 올라가고, 완료하면 답변이 잠긴다 */}
+              {canFinish && (
+                finished ? (
                   <div className="no-print mt-3 rounded-xl border border-green-200 bg-green-50/60 px-4 py-2.5">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-sm text-slate-600">
-                        <b className="text-green-700">✓ 완성한 답변</b>
-                        <span className="ml-2 text-xs text-slate-400">스피치 훈련에 올라갔어요</span>
+                        <b className="text-green-700">✓ 최종 완료</b>
+                        <span className="ml-2 text-xs text-slate-400">이 답변으로 스피치 훈련을 해요</span>
                       </p>
                       <div className="flex shrink-0 gap-1.5">
                         <button type="button" onClick={() => uncompleteAnswer(q)} disabled={locked}
                           className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-50 disabled:opacity-40">
-                          완성 취소
+                          다시 고치기
                         </button>
                         {!isLocked("speech") && (
                           <button type="button" onClick={() => setActiveTab("speech")}
@@ -1101,22 +1139,22 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                         )}
                       </div>
                     </div>
-                    {(a.final_answer ?? "").trim() !== (a.student_answer ?? "").trim() && (
+                    {newTeacherAnswer && (
                       <p className="mt-1.5 text-[11px] text-amber-600">
-                        완성한 뒤에 답변을 고쳤어요. 스피치 훈련은 완성할 때의 답변으로 합니다.
-                        고친 답변으로 연습하려면 [완성 취소] 후 다시 완성하세요.
+                        최종 완료한 뒤에 선생님이 고쳐준 답변이 있어요. 반영하려면 [다시 고치기]를 누르세요.
                       </p>
                     )}
                   </div>
                 ) : (
-                  <div className="no-print mt-3 flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 px-4 py-2.5">
+                  <div className="no-print mt-3 flex items-center justify-between gap-3 rounded-xl border border-dashed border-green-300 px-4 py-2.5">
                     <p className="text-xs text-slate-500">
-                      피드백을 반영해 답변을 다 고쳤으면 완성하세요. 선생님께 전달되고 🎙 스피치 훈련 탭에 연습 문제로 올라가요.
+                      답변을 다 고쳤으면 <b className="text-green-700">최종 완료</b>를 누르세요.
+                      선생님께 전달되고 🎙 스피치 훈련에 연습 문제로 올라가요.
                     </p>
                     <button type="button" onClick={() => completeAnswer(q)}
-                      disabled={locked || !t.trim()}
+                      disabled={locked || !t.trim() || finishingId === q.id}
                       className="shrink-0 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-green-700 disabled:opacity-40">
-                      ✓ 답변 완성
+                      {finishingId === q.id ? "처리 중..." : "✓ 최종 완료"}
                     </button>
                   </div>
                 )
@@ -1126,7 +1164,6 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
               {(childMap[q.id] ?? []).map((c) => {
                 const ca = c._answer;
                 const ct = answers[c.id] ?? "";
-                const cDirty = ct !== (ca?.student_answer ?? "");
                 const cSubmitted = isSubmitted(ca, ct);
                 const cfb = ca?.teacher_feedback || "";
                 const cGrades = cfb ? parseGrades(cfb) : null;
@@ -1211,6 +1248,8 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
             ? "학과를 선택하고 Day별 문제를 풀면 정답과 해설을 바로 확인할 수 있습니다."
             : isPtTab
             ? "제시문을 읽고 개요를 작성한 뒤, 실제처럼 발표를 녹음하고 피드백을 받습니다."
+            : SPEECH_TABS.includes(activeTab)
+            ? "작성 중인 내용은 자동 저장됩니다. 저장을 누르면 선생님께 전달되고, 다 고친 답변은 최종 완료를 눌러 스피치 훈련으로 연습하세요."
             : "작성 중인 내용은 자동 저장됩니다. 저장 버튼을 눌러야 선생님께 전달됩니다."}
         </p>
       </div>
@@ -1322,7 +1361,6 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
 
       {renderBody()}
 
-      {/* 탭을 처음 눌렀을 때 한 번만 뜨는 안내 */}
       {/* 스피치 연습 창 */}
       {drillQ && (
         <SpeechDrill
@@ -1334,7 +1372,8 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
         />
       )}
 
-      {/* 생기부는 질문이 온 뒤에 안내한다 (빈 탭에서 보고 지나가지 않게) */}
+      {/* 탭을 처음 눌렀을 때 한 번만 뜨는 안내
+          생기부는 질문이 온 뒤에 안내한다 (빈 탭에서 보고 지나가지 않게) */}
       {seenGuides && activeTab && !loadingQ &&
         !(activeTab === "saenggibu" && questions.length === 0) && (
         <GuideTour

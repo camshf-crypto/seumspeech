@@ -1,8 +1,12 @@
 // src/pages/student/SpeechTraining.jsx
 // 스피치 훈련 탭
 //
-// 기본 인성·생기부·기출 탭에서 [답변 완성]을 누른 답변이 여기 연습 문제로 올라온다.
+// 기본 인성·생기부·기출 탭에서 [최종 완료]를 누른 답변이 여기 연습 문제로 올라온다.
 // 문항을 누르면 클로즈 스피치 연습(SpeechDrill)이 열린다.
+//
+// 답변을 [다시 고치기] 하면 "고치는 중"으로 내려가 연습이 잠기고,
+// 다시 [최종 완료]하면 새 답변으로 1단계부터 다시 시작한다.
+// (예전 답변으로 한 연습 기록은 지우지 않고 횟수만 따로 보여준다)
 
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
@@ -18,22 +22,22 @@ const GROUPS = [
 ];
 
 export default function SpeechTraining({ studentId, locked, onGoTab }) {
-  const [items, setItems] = useState([]);     // [{ group, question, answer, drills }]
+  const [items, setItems] = useState([]);     // [{ question, answer, drills, oldDrills, editing }]
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(null);     // 연습 중인 항목
 
   const load = async () => {
     setLoading(true);
 
-    // 1) 완성한 답변
+    // 1) 한 번이라도 최종 완료한 답변 (지금 완료 상태 + 다시 고치는 중)
     const { data: ans, error } = await supabase
       .from("interview_answers_v2")
       .select("*")
       .eq("student_id", studentId)
-      .not("completed_at", "is", null)
-      .order("completed_at", { ascending: false });
-    if (error) console.error("완성 답변 조회 실패:", error);
-    const answers = ans ?? [];
+      .not("final_answer", "is", null)
+      .order("updated_at", { ascending: false });
+    if (error) console.error("최종 완료 답변 조회 실패:", error);
+    const answers = (ans ?? []).filter((a) => (a.final_answer ?? "").trim() || a.completed_at);
     const ids = answers.map((a) => a.question_id);
 
     if (ids.length === 0) {
@@ -86,11 +90,20 @@ export default function SpeechTraining({ studentId, locked, onGoTab }) {
     setItems(
       answers
         .filter((a) => qMap[a.question_id])
-        .map((a) => ({
-          question: qMap[a.question_id],
-          answer: a,
-          drills: dMap[a.id] ?? [],
-        }))
+        .map((a) => {
+          const all = dMap[a.id] ?? [];
+          const since = a.completed_at ? new Date(a.completed_at) : null;
+          // 지금 최종 완료한 답변으로 한 연습만 단계에 친다
+          const drills = since ? all.filter((d) => new Date(d.created_at) >= since) : [];
+          const oldDrills = since ? all.filter((d) => new Date(d.created_at) < since) : all;
+          return {
+            question: qMap[a.question_id],
+            answer: a,
+            drills,
+            oldDrills,
+            editing: !a.completed_at,   // 다시 고치는 중
+          };
+        })
     );
     setLoading(false);
   };
@@ -109,13 +122,16 @@ export default function SpeechTraining({ studentId, locked, onGoTab }) {
 
   if (loading) return <p className="py-10 text-center text-slate-400">불러오는 중...</p>;
 
+  const ready = items.filter((it) => !it.editing);
+  const editing = items.filter((it) => it.editing);
+
   if (items.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-slate-300 px-6 py-12 text-center">
         <p className="text-base font-bold text-slate-500">아직 연습할 답변이 없어요</p>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          기본 인성·생기부·기출 탭에서 선생님 피드백을 받고 답변을 다 고쳤으면<br />
-          <b className="text-green-600">✓ 답변 완성</b>을 누르세요. 그 답변이 여기 연습 문제로 올라와요.
+          기본 인성·생기부·기출 탭에서 답변을 다 고쳤으면<br />
+          <b className="text-green-600">✓ 최종 완료</b>를 누르세요. 그 답변이 여기 연습 문제로 올라와요.
         </p>
         {onGoTab && (
           <button type="button" onClick={() => onGoTab("insung")}
@@ -127,7 +143,7 @@ export default function SpeechTraining({ studentId, locked, onGoTab }) {
     );
   }
 
-  const totalDone = items.filter((it) => reached(it.drills) >= 5).length;
+  const totalDone = ready.filter((it) => reached(it.drills) >= 5).length;
 
   return (
     <div>
@@ -135,16 +151,17 @@ export default function SpeechTraining({ studentId, locked, onGoTab }) {
       <div className="mb-4 rounded-xl bg-seum-navy px-5 py-4 text-white">
         <p className="text-base font-bold">🎙 스피치 훈련</p>
         <p className="mt-1 text-sm text-white/70">
-          완성한 답변을 보지 않고 내 말로 말할 수 있을 때까지. 가리는 부분을 늘려가며 5단계까지 연습해요.
+          최종 완료한 답변을 보지 않고 내 말로 말할 수 있을 때까지. 가리는 부분을 늘려가며 5단계까지 연습해요.
         </p>
         <p className="mt-2 text-xs text-white/50">
-          완성한 답변 {items.length}개 · 5단계까지 마친 답변 {totalDone}개
+          연습할 답변 {ready.length}개 · 5단계까지 마친 답변 {totalDone}개
+          {editing.length > 0 && ` · 고치는 중 ${editing.length}개`}
         </p>
       </div>
 
       {/* 묶음별 목록 */}
       {GROUPS.map((g) => {
-        const list = items.filter((it) => it.question.group === g.key);
+        const list = ready.filter((it) => it.question.group === g.key);
         if (list.length === 0) return null;
         return (
           <div key={g.key} className="mb-5">
@@ -166,7 +183,12 @@ export default function SpeechTraining({ studentId, locked, onGoTab }) {
                               {last.retention != null && ` · 최근 ${last.retention}%`}
                               {` · ${it.drills.length}번 연습`}
                             </>
+                          : it.oldDrills.length > 0
+                          ? <><b className="text-amber-600">새 답변</b>{" · 1단계부터 다시 시작해요"}</>
                           : "아직 연습하지 않았어요"}
+                        {it.oldDrills.length > 0 && (
+                          <span className="text-slate-300">{` · 예전 답변으로 ${it.oldDrills.length}번 연습`}</span>
+                        )}
                       </p>
                     </div>
 
@@ -189,6 +211,34 @@ export default function SpeechTraining({ studentId, locked, onGoTab }) {
           </div>
         );
       })}
+
+      {/* 다시 고치는 중 — 연습 잠김 */}
+      {editing.length > 0 && (
+        <div className="mb-5">
+          <p className="mb-2 text-xs font-bold text-slate-400">고치는 중 · 다시 최종 완료하면 연습할 수 있어요</p>
+          <div className="overflow-hidden rounded-xl border border-dashed border-slate-300 bg-slate-50">
+            {editing.map((it, i) => (
+              <div key={it.answer.id}
+                className={`flex items-center gap-3 px-4 py-3 ${i > 0 ? "border-t border-slate-200" : ""}`}>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-slate-500">{it.question.question}</p>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    {it.question.univ ? `${it.question.univ} · ${it.question.major} · ` : ""}
+                    ✏️ 답변을 고치는 중이에요
+                    {it.oldDrills.length > 0 && ` · 지금까지 ${it.oldDrills.length}번 연습`}
+                  </p>
+                </div>
+                {onGoTab && (
+                  <button type="button" onClick={() => onGoTab(it.question.tab_key)}
+                    className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100">
+                    고치러 가기
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {open && (
         <SpeechDrill
