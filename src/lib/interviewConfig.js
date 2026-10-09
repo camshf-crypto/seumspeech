@@ -79,7 +79,7 @@ export const CATEGORIES = {
       { key: "saenggibu", label: "생기부 예상질문" },
       { key: "gichul", label: "기출문제" },
       { key: "speech", label: "스피치 훈련" },
-      { key: "mock", label: "면접 모의고사" },
+      { key: "mock", label: "모의면접" },
       { key: "simulation", label: "면접 시뮬레이션" },
       { key: "jamun", label: "제시문 면접" },
       { key: "major", label: "전공특화문제" },
@@ -113,8 +113,8 @@ export const CATEGORY_LIST = Object.values(CATEGORIES);
 
 // ============================================================
 // 학생 화면에서는 감추는 탭
-// mock(면접 모의고사) — 선생님이 출제하는 자리다.
-// 출제하면 학생에게는 '면접 시뮬레이션' 안에 나타난다.
+// mock(모의면접) — 학원에서 선생님이 진행하는 현장 모의면접 기록이다.
+// 학생은 면접 화면의 [현장 면접 대기]로 핸드폰 녹음만 돕는다.
 // ============================================================
 export const STUDENT_HIDDEN_TABS = ["mock"];
 

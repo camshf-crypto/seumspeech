@@ -8,6 +8,7 @@ import SpeechTraining from "./SpeechTraining";
 import Simulation from "./Simulation";
 import MajorQuestions from "./MajorQuestions";
 import PtPractice from "./PtPractice";
+import LiveMockRoom from "./LiveMockRoom";
 import {
   getCategory,
   getSubLabel,
@@ -412,6 +413,7 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
   const [assignment, setAssignment] = useState(null);
   const [activeTab, setActiveTab] = useState(null);
   const [seenGuides, setSeenGuides] = useState(null);   // 탭 안내를 본 기록
+  const [liveRoom, setLiveRoom] = useState(false);       // 현장 면접 대기 (학원 모의면접 때 핸드폰 녹음)
   const [drillQ, setDrillQ] = useState(null);           // 스피치 연습 중인 질문
 
   // 탭별 처음 안내 — 어느 탭을 이미 봤는지 불러온다
@@ -1319,7 +1321,20 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
             자료집 다운로드
           </button>
         )}
+
+        {/* 현장 모의면접 — 학원에서 선생님이 진행할 때 내 핸드폰으로 대답을 같이 녹음 */}
+        {isUniv && (
+          <button
+            type="button"
+            onClick={() => setLiveRoom(true)}
+            className={`${materials.length > 0 ? "" : "ml-auto "}rounded-full border border-seum-blue bg-white px-4 py-1.5 text-sm font-bold text-seum-blue transition hover:bg-blue-50`}
+          >
+            🎙 현장 면접 대기
+          </button>
+        )}
       </div>
+
+      {liveRoom && <LiveMockRoom onClose={() => setLiveRoom(false)} />}
 
       {/* 공무원 등: 직렬 버튼 */}
       {showSeriesPicker && (

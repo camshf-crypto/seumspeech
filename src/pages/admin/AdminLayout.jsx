@@ -15,6 +15,7 @@ import PaymentsTab from "./PaymentsTab";
 import AdminSettlementTab from "./AdminSettlementTab";
 import ContentTab from "./ContentTab";
 import TeacherProfileTab from "./TeacherProfileTab";
+import TeacherMockPanel from "../teacher/TeacherMockPanel";
 import PushNotificationButton from "./PushNotificationButton";
 
 // 학생 자료함은 수강생 관리 목록의 [자료함] 버튼으로 옮겼고,
@@ -26,6 +27,7 @@ const MENUS = [
   { key: "courses", label: "반/수업 개설" },
   { key: "students", label: "수강생(수업) 관리" },
   { key: "assign", label: "학생 배정" },
+  { key: "mock", label: "모의면접" },
   { key: "teachers", label: "선생님 관리" },
   { key: "consult", label: "상담 관리" },
   { key: "consultManual", label: "상담 매뉴얼" },
@@ -102,6 +104,8 @@ export default function AdminLayout() {
         return <StudentsTab branchId={branchId} />;
       case "assign":
         return <AssignTab />;
+      case "mock":
+        return <TeacherMockPanel teacherId={profile?.id} branchId={branchId} />;
       case "teachers":
         return <TeachersTab branchId={branchId} />;
       case "consult":

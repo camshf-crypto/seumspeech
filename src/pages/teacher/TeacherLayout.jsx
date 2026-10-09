@@ -10,6 +10,7 @@ import TeacherNotificationsTab from "./TeacherNotificationsTab";
 import TeacherSettlementTab from "./TeacherSettlementTab";
 import StudentMaterialsView from "../../components/StudentMaterialsView";
 import TeacherInterviewTab from "./TeacherInterviewTab";
+import TeacherMockPanel from "./TeacherMockPanel";
 import TeacherMemosTab from "./TeacherMemosTab";
 import TeacherMyPageTab from "./TeacherMyPageTab";
 import GuideTour from "../../components/GuideTour";
@@ -20,6 +21,7 @@ const MENUS = [
   { key: "homework", label: "숙제 피드백" },
   { key: "interview_group", label: "단체반 수업" },
   { key: "interview_one", label: "1:1 수업" },
+  { key: "mock", label: "모의면접" },
   { key: "materials", label: "학생 자료함" },
   { key: "chat", label: "학생 채팅" },
   { key: "notifications", label: "알림" },
@@ -111,6 +113,8 @@ export default function TeacherLayout() {
         return <TeacherInterviewTab teacherId={profile.id} courseType="group" />;
       case "interview_one":
         return <TeacherInterviewTab teacherId={profile.id} courseType="oneonone" />;
+      case "mock":
+        return <TeacherMockPanel teacherId={profile.id} />;
       case "materials":
         return <StudentMaterialsView teacherId={profile.id} />;
       case "chat":

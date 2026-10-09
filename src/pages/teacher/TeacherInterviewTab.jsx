@@ -1447,7 +1447,6 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                 <TeacherMockPanel
                   student={selStudent}
                   teacherId={myId}
-                  concept={savedConcept}
                 />
               ) : isPt ? (
                 <PtReview

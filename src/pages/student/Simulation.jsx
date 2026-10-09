@@ -65,7 +65,8 @@ export default function Simulation({ studentId, locked = false }) {
     const practiceList = simHistory.filter((s) => !s.is_mock)
     const mockList = simHistory.filter((s) => s.is_mock)
     const waitingCount = mockList.filter((s) => (s.status ?? 'done') !== 'done').length
-    const listData = mode === 'mock' ? mockList : practiceList
+    // 선생님이 보내던 면접 모의고사는 현장 모의면접으로 바뀌어 여기서는 연습 기록만 보여 준다
+    const listData = practiceList
 
     const [step, setStep] = useState('list')
     const [questionType, setQuestionType] = useState('')
@@ -643,7 +644,6 @@ export default function Simulation({ studentId, locked = false }) {
                     <div className="flex border-b border-slate-200">
                         {[
                             { id: 'practice', label: '연습', count: practiceList.length },
-                            { id: 'mock', label: '모의고사', count: mockList.length },
                         ].map((t) => {
                             const on = mode === t.id
                             return (
