@@ -18,11 +18,25 @@ import { supabase } from "../../lib/supabase";
  * 학생 핸드폰: 학생이 면접 화면에서 [현장 면접 대기]를 켜 두면 채널 live-mock-{학생id} 로 연결된다.
  *
  * 쓰는 곳
- *   선생님·원장 메뉴 "모의면접"             <TeacherMockPanel teacherId branchId />
+ *   선생님·원장 메뉴 "모의면접"             <TeacherMockPanel teacherId />  (branchId 를 넘겨도 무시)
  *   선생님 면접 화면 > 학생 > 모의면접 탭   <TeacherMockPanel teacherId student />
+ *
+ * 모의면접 신청 (mock_requests)
+ *   학생이 메뉴 "모의면접 신청"에서 수·목 18:30 / 20:00 타임을 예약한다.
+ *   이 화면 위쪽에 날짜·타임별 명단을 보여주고, [이 타임으로 시작]을 누르면
+ *   신청한 학생과 각자 적은 학교·학과가 미리 채워진 채로 현장 모의면접이 열린다.
+ *   선생님 = 담당 학생 신청만, 원장 = 전체 (마곡에서만 하므로 지점 구분 없음)
  */
 
 const MAX_STUDENTS = 6;
+const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const slotLabel = (ds) => { const d = new Date(`${ds}T00:00:00`); return `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEK[d.getDay()]})`; };
+const REQ_STATUS = {
+  booked:  { label: "신청", cls: "bg-blue-50 text-seum-blue" },
+  done:    { label: "완료", cls: "bg-emerald-50 text-emerald-700" },
+  no_show: { label: "불참", cls: "bg-red-50 text-red-600" },
+};
 const MAX_EACH = 5;
 const INTRO = "본인을 소개해 주세요.";
 const SOURCES = [
@@ -185,7 +199,10 @@ async function runMockAi(row, ctx) {
 // ============================================================
 // 화면
 // ============================================================
-export default function TeacherMockPanel({ teacherId, student = null, branchId = null }) {
+export default function TeacherMockPanel({ teacherId, student = null }) {
+  // 모의면접은 마곡에서만 하므로 마곡·루원 학생을 지점 구분 없이 한 명단으로 본다.
+  // (원장 화면에서 지점을 골라도 이 화면은 늘 전체)
+  const branchId = null;
   const [me, setMe] = useState({ id: teacherId ?? null, role: null });
   const isMaster = me.role === "master";
 
@@ -198,6 +215,10 @@ export default function TeacherMockPanel({ teacherId, student = null, branchId =
   const [live, setLive] = useState(false);
   const [reportFor, setReportFor] = useState(null);   // { id, name } — 성장 리포트
   const [reportPick, setReportPick] = useState(false); // 성장 리포트 학생 고르기 창
+  const [liveOpts, setLiveOpts] = useState(null);      // 신청 타임으로 시작할 때 { ids, wishes, group, reqIds }
+  const [requests, setRequests] = useState([]);        // 모의면접 신청 (mock_requests)
+  const [reqLoading, setReqLoading] = useState(true);
+  const [showPast, setShowPast] = useState(false);
 
   // 로그인한 사람과 역할
   useEffect(() => {
@@ -233,6 +254,85 @@ export default function TeacherMockPanel({ teacherId, student = null, branchId =
     })();
     return () => { alive = false; };
   }, [me.id, me.role, isMaster, branchId]);
+
+  // 모의면접 신청 — 오늘부터 앞으로 + 지난 30일
+  const loadRequests = async () => {
+    if (!me.role || student) { setReqLoading(false); return; }
+    setReqLoading(true);
+    const from = new Date();
+    from.setDate(from.getDate() - 30);
+    let q = supabase
+      .from("mock_requests")
+      .select("*, profiles:student_id(name)")
+      .gte("slot_date", ymd(from))
+      .order("slot_date", { ascending: true })
+      .order("slot_time", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (!isMaster || branchId) {
+      const ids = students.map((s) => s.id);
+      if (ids.length === 0) { setRequests([]); setReqLoading(false); return; }
+      q = q.in("student_id", ids);
+    }
+    const { data, error } = await q;
+    if (error) console.error("모의면접 신청 조회 실패:", error);
+    setRequests(data ?? []);
+    setReqLoading(false);
+  };
+
+  useEffect(() => {
+    if (studentsLoading) return;
+    loadRequests();
+    /* eslint-disable-next-line */
+  }, [studentsLoading, student?.id, isMaster, branchId]);
+
+  const setReqStatus = async (ids, status) => {
+    if (!ids.length) return;
+    const { error } = await supabase
+      .from("mock_requests")
+      .update({ status, updated_at: new Date().toISOString() })
+      .in("id", ids);
+    if (error) return alert("바꾸기 실패: " + error.message);
+    setRequests((list) => list.map((r) => (ids.includes(r.id) ? { ...r, status } : r)));
+  };
+
+  // 날짜·타임별로 묶기
+  const slots = useMemo(() => {
+    const today = ymd(new Date());
+    const m = {};
+    requests.forEach((r) => {
+      const key = `${r.slot_date}|${r.slot_time}`;
+      if (!m[key]) m[key] = { key, date: r.slot_date, time: r.slot_time, items: [] };
+      m[key].items.push(r);
+    });
+    const all = Object.values(m);
+    return {
+      upcoming: all.filter((g) => g.date >= today),
+      past: all.filter((g) => g.date < today).reverse(),
+      today,
+    };
+  }, [requests]);
+
+  // 이 타임으로 시작 — 신청한 학생과 각자 적은 학교를 미리 채운다
+  const startSlot = (g) => {
+    const items = g.items.filter((r) => r.status !== "no_show");
+    const known = new Set(students.map((s) => s.id));
+    const ids = items.map((r) => r.student_id).filter((id) => known.has(id));
+    const missing = items.filter((r) => !known.has(r.student_id));
+    if (missing.length) {
+      alert(`${missing.map((r) => r.profiles?.name ?? "학생").join(", ")} 학생은 대입 면접 수업 명단에 없어 빠집니다.`);
+    }
+    if (!ids.length) return;
+    const wishes = Object.fromEntries(items.map((r) => [r.student_id, {
+      univ: r.target_univ, major: r.target_major, admission: r.target_admission || null,
+    }]));
+    setLiveOpts({
+      ids,
+      wishes,
+      group: `${g.time} 타임`,
+      reqIds: items.filter((r) => ids.includes(r.student_id)).map((r) => r.id),
+    });
+    setLive(true);
+  };
 
   // 지난 현장 모의면접
   const loadSessions = async () => {
@@ -399,6 +499,88 @@ export default function TeacherMockPanel({ teacherId, student = null, branchId =
         학원에서 학생 최대 {MAX_STUDENTS}명을 한 번에 진행합니다. 학생이 핸드폰으로 면접 화면의 [현장 면접 대기]를 켜 두면 노트북과 함께 녹음됩니다.
       </p>
 
+      {/* 모의면접 신청 현황 */}
+      {!student && (
+        <div className="mb-6">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm font-bold text-seum-navy">
+              📅 모의면접 신청
+              <span className="ml-2 text-xs font-medium text-slate-400">
+                {reqLoading ? "…" : `다가오는 ${slots.upcoming.reduce((n, g) => n + g.items.filter((r) => r.status === "booked").length, 0)}명`}
+              </span>
+            </p>
+            {slots.past.length > 0 && (
+              <button type="button" onClick={() => setShowPast((v) => !v)} className="text-xs text-slate-400 hover:text-seum-blue">
+                {showPast ? "지난 신청 접기" : `지난 신청 ${slots.past.length}타임 보기`}
+              </button>
+            )}
+          </div>
+
+          {reqLoading ? (
+            <p className="py-6 text-center text-sm text-slate-400">불러오는 중...</p>
+          ) : slots.upcoming.length === 0 && !showPast ? (
+            <p className="border border-dashed border-slate-300 py-6 text-center text-sm text-slate-400">
+              아직 신청한 학생이 없습니다. 학생은 왼쪽 메뉴 [모의면접 신청]에서 예약합니다.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {[...slots.upcoming, ...(showPast ? slots.past : [])].map((g) => {
+                const isToday = g.date === slots.today;
+                const isPast = g.date < slots.today;
+                const booked = g.items.filter((r) => r.status === "booked");
+                return (
+                  <div key={g.key} className={`border bg-white ${isToday ? "border-seum-blue" : "border-slate-200"} ${isPast ? "opacity-70" : ""}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
+                      <p className="text-sm font-bold text-seum-navy">
+                        {isToday && <span className="mr-1.5 bg-seum-blue px-1.5 py-0.5 text-[10px] text-white">오늘</span>}
+                        {slotLabel(g.date)} {g.time}
+                        <span className="ml-2 text-xs font-medium text-slate-400">{g.items.length}명</span>
+                      </p>
+                      {!isPast && booked.length > 0 && (
+                        <button type="button" onClick={() => startSlot(g)}
+                          className="bg-seum-blue px-3 py-1.5 text-xs font-bold text-white hover:bg-[#2a63c4]">
+                          🎙 이 타임으로 시작
+                        </button>
+                      )}
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {g.items.map((r) => {
+                        const st = REQ_STATUS[r.status] ?? REQ_STATUS.booked;
+                        return (
+                          <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
+                            <span className="w-16 shrink-0 text-sm font-bold text-seum-navy">{r.profiles?.name ?? nameOf(r.student_id)}</span>
+                            <span className="min-w-0 flex-1 text-xs text-slate-600">
+                              {r.target_univ} · {r.target_major}
+                              {r.target_admission && <span className="text-slate-400"> · {r.target_admission}</span>}
+                              {r.note && <span className="ml-1.5 text-slate-400">“{r.note}”</span>}
+                            </span>
+                            <span className={`px-1.5 py-0.5 text-[10px] font-bold ${st.cls}`}>{st.label}</span>
+                            <div className="flex gap-1">
+                              {r.status !== "done" && (
+                                <button type="button" onClick={() => setReqStatus([r.id], "done")}
+                                  className="border border-slate-200 px-2 py-0.5 text-[11px] text-slate-500 hover:border-emerald-400 hover:text-emerald-700">완료</button>
+                              )}
+                              {r.status !== "no_show" && (
+                                <button type="button" onClick={() => setReqStatus([r.id], "no_show")}
+                                  className="border border-slate-200 px-2 py-0.5 text-[11px] text-slate-500 hover:border-red-300 hover:text-red-600">불참</button>
+                              )}
+                              {r.status !== "booked" && (
+                                <button type="button" onClick={() => setReqStatus([r.id], "booked")}
+                                  className="border border-slate-200 px-2 py-0.5 text-[11px] text-slate-400 hover:text-seum-blue">되돌리기</button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 목록 */}
       {sessionsLoading ? (
         <p className="py-10 text-center text-slate-400">불러오는 중...</p>
@@ -486,8 +668,11 @@ export default function TeacherMockPanel({ teacherId, student = null, branchId =
         <LiveSession
           teacherId={me.id}
           students={students}
-          defaultIds={student ? [student.id] : []}
-          onClose={() => { setLive(false); loadSessions(); }}
+          defaultIds={liveOpts?.ids ?? (student ? [student.id] : [])}
+          wishes={liveOpts?.wishes ?? {}}
+          defaultGroup={liveOpts?.group}
+          onStarted={() => { if (liveOpts?.reqIds?.length) setReqStatus(liveOpts.reqIds, "done"); }}
+          onClose={() => { setLive(false); setLiveOpts(null); loadSessions(); }}
         />
       )}
     </div>
@@ -1039,7 +1224,7 @@ function QuestionResult({ row, no, ctx, onSaved }) {
 // ============================================================
 // 진행 — 전체 화면
 // ============================================================
-function LiveSession({ teacherId, students, defaultIds, onClose }) {
+function LiveSession({ teacherId, students, defaultIds, wishes = {}, defaultGroup, onStarted, onClose }) {
   const today = new Date();
   const period = `${today.getMonth() + 1}월 ${today.getDate()}일`;
 
@@ -1047,7 +1232,7 @@ function LiveSession({ teacherId, students, defaultIds, onClose }) {
   const [step, setStep] = useState("setup");
   const [picked, setPicked] = useState(() => defaultIds.filter((id) => students.some((s) => s.id === id)));
   const [search, setSearch] = useState("");
-  const [group, setGroup] = useState("1조");
+  const [group, setGroup] = useState(defaultGroup || "1조");
   const [univPicks, setUnivPicks] = useState({});   // { [학생]: [지원 학교...] }
   const [target, setTarget] = useState({});         // { [학생]: 고른 지원 학교 id }
   const [counts, setCounts] = useState({});         // { [학생]: { insung, saenggibu, gichul } }
@@ -1080,10 +1265,24 @@ function LiveSession({ teacherId, students, defaultIds, onClose }) {
       const m = {};
       need.forEach((id) => { m[id] = []; });
       (data ?? []).forEach((p) => { m[p.student_id].push(p); });
+
+      // 모의면접 신청 때 적은 학교 — 지원 목록에 있으면 그걸, 없으면 목록에 더해서 고른다
+      const wishId = {};
+      need.forEach((id) => {
+        const w = wishes[id];
+        if (!w?.univ) return;
+        const same = (a, b) => (a ?? "").replace(/\s/g, "") === (b ?? "").replace(/\s/g, "");
+        const hit = m[id].find((p) => same(p.univ, w.univ) && same(p.major, w.major));
+        if (hit) { wishId[id] = hit.id; return; }
+        const extra = { id: `wish-${id}`, student_id: id, univ: w.univ, major: w.major, admission: w.admission };
+        m[id] = [extra, ...m[id]];
+        wishId[id] = extra.id;
+      });
+
       setUnivPicks((u) => ({ ...u, ...m }));
       setTarget((t) => {
         const n = { ...t };
-        need.forEach((id) => { if (!n[id] && m[id][0]) n[id] = m[id][0].id; });
+        need.forEach((id) => { if (!n[id]) n[id] = wishId[id] ?? m[id][0]?.id; });
         return n;
       });
     })();
@@ -1252,6 +1451,7 @@ function LiveSession({ teacherId, students, defaultIds, onClose }) {
       setSeats(next);
       setSel(0);
       setStep("live");
+      onStarted?.();
     } catch (e) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       setErr(e?.name === "NotAllowedError"

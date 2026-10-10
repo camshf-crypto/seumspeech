@@ -8,6 +8,7 @@ import PaymentsTab from "./PaymentsTab";
 import ChatTab from "./ChatTab";
 import NotificationsTab from "./NotificationsTab";
 import StudentInterviewTab from "./StudentInterviewTab";
+import MockBooking from "./MockBooking";
 import AbsenceRequestTab from "./AbsenceRequestTab";
 import AiWorkHome from "./AiWorkHome";
 import GuideTour from "../../components/GuideTour";
@@ -27,6 +28,7 @@ const ALL_KEYS = [
   "materials",
   "homework",
   "interview",
+  "mock_booking",
   "aiwork",
   "chat",
   "payments",
@@ -154,6 +156,9 @@ export default function StudentLayout() {
   );
   const hasAiWork = AIWORK_CATEGORIES.some((c) => myCategories.has(c));
 
+  // 모의면접 신청은 대입 면접 학생만
+  const hasUniv = myCategories.has("univ");
+
   const hasActive = enrollments.some((e) => !isExpired(e));
   const locked = enrollments.length > 0 && !hasActive;
 
@@ -163,6 +168,7 @@ export default function StudentLayout() {
     { key: "materials", label: "자료 제출함" },
     { key: "homework", label: "숙제" },
     ...(hasInterview ? [{ key: "interview", label: "나의 면접 수업" }] : []),
+    ...(hasUniv ? [{ key: "mock_booking", label: "모의면접 신청" }] : []),
     ...(hasAiWork ? [{ key: "aiwork", label: "AI 직무역량" }] : []),
     { key: "chat", label: "선생님과 채팅" },
     { key: "payments", label: "결제내역" },
@@ -249,6 +255,15 @@ export default function StudentLayout() {
       {active === "materials" && <MaterialsTab studentId={profile.id} locked={locked} />}
       {active === "homework" && <HomeworkTab studentId={profile.id} locked={locked} />}
       {active === "interview" && <StudentInterviewTab studentId={profile.id} locked={locked} />}
+      {active === "mock_booking" && (
+        hasUniv ? (
+          <MockBooking studentId={profile.id} asPage />
+        ) : !loading ? (
+          <p className="rounded-xl border border-dashed border-slate-300 py-10 text-center text-slate-400">
+            대입 면접 수업을 듣는 학생만 신청할 수 있습니다.
+          </p>
+        ) : null
+      )}
       {active === "aiwork" && (
         hasAiWork ? (
           <AiWorkHome />
@@ -373,7 +388,7 @@ export default function StudentLayout() {
       {seenGuides && profile?.id && (
         <GuideTour
           userId={profile.id}
-          guideKey={active === "aiwork" && !hasAiWork ? null : active}
+          guideKey={(active === "aiwork" && !hasAiWork) || active === "mock_booking" ? null : active}
           seen={seenGuides}
           onDone={(next) => setSeenGuides(next)}
         />
