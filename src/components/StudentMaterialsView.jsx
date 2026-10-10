@@ -1,21 +1,24 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { CATEGORY_LIST, getCategoryLabel } from "../lib/interviewConfig";
 
-const CATEGORIES = ["전체", "이력서", "자기소개서", "준비자료", "기타"];
+// 학생 자료 제출함
+//
+// 예전에는 공무원·공기업·사기업 수업 3개(수업 id를 직접 적어둠)만 불러와서
+// 대입·경찰·고입·병원·편입 학생은 담당이 맞아도 목록에 안 보였다.
+// 이제는 내 담당 수강 전체에서 자료를 올린 학생을 모두 보여주고,
+// 면접 종류는 수업(courses.interview_category) → 학생 배정(interview_assignments) 순서로 정한다.
 
-const INTERVIEW_COURSES = {
-  "8e8666ac-0724-4c97-8ae7-e9af6f32c864": "공무원면접",
-  "6acedcd5-b975-4955-96ef-1f9f6abba5e8": "공기업면접",
-  "f295037a-b3ee-4178-9de7-a1b75d50a2c1": "사기업면접",
+const CATEGORIES = ["전체", "이력서", "자기소개서", "생기부", "준비자료", "기타"];
+
+// 면접 종류가 비어 있던 예전 수업 — 수업 id로 종류를 정한다
+const LEGACY_COURSES = {
+  "8e8666ac-0724-4c97-8ae7-e9af6f32c864": "gov",
+  "6acedcd5-b975-4955-96ef-1f9f6abba5e8": "public_corp",
+  "f295037a-b3ee-4178-9de7-a1b75d50a2c1": "company",
 };
-const INTERVIEW_IDS = Object.keys(INTERVIEW_COURSES);
 
-const TYPE_FILTERS = [
-  { key: "all", label: "전체" },
-  { key: "8e8666ac-0724-4c97-8ae7-e9af6f32c864", label: "공무원" },
-  { key: "6acedcd5-b975-4955-96ef-1f9f6abba5e8", label: "공기업" },
-  { key: "f295037a-b3ee-4178-9de7-a1b75d50a2c1", label: "사기업" },
-];
+const typeLabel = (key) => (key && key !== "etc" ? getCategoryLabel(key) : "기타");
 
 const fmt = (d) => (d ? new Date(d).toLocaleDateString("ko-KR") : "-");
 
@@ -33,21 +36,22 @@ export default function StudentMaterialsView({ teacherId }) {
   const load = async () => {
     setLoading(true);
 
-    // ✅ 담당(enrollments.teacher_id = 나) + 면접 과목인 수강만
+    // 담당(enrollments.teacher_id = 나) 수강 전체. 원장(teacherId 없음)은 전체
     let query = supabase
       .from("enrollments")
-      .select("*, profiles:student_id(name, phone)")
-      .in("course_id", INTERVIEW_IDS);
+      .select("*, profiles:student_id(name, phone), courses(title, interview_category)");
 
     if (teacherId) query = query.eq("teacher_id", teacherId);
 
-    const { data: enr } = await query;
-    const enrList = enr ?? [];
+    const { data: enr, error } = await query;
+    if (error) console.error("담당 수강 조회 실패:", error);
+    const enrList = (enr ?? []).filter((e) => e.student_id);
 
     if (enrList.length === 0) { setRows([]); setLoading(false); return; }
 
-    // 담당 학생들의 자료 개수만 집계
-    const studentIds = [...new Set(enrList.map((e) => e.student_id).filter(Boolean))];
+    const studentIds = [...new Set(enrList.map((e) => e.student_id))];
+
+    // 담당 학생들의 자료 개수
     const { data: mats } = await supabase
       .from("student_materials")
       .select("student_id")
@@ -55,13 +59,35 @@ export default function StudentMaterialsView({ teacherId }) {
 
     const countMap = {};
     (mats ?? []).forEach((m) => { countMap[m.student_id] = (countMap[m.student_id] || 0) + 1; });
-    const matStudentIds = new Set(Object.keys(countMap));
 
-    // 자료를 실제로 올린 학생만 표시
-    const filtered = enrList
-      .filter((e) => matStudentIds.has(e.student_id))
-      .map((e) => ({ ...e, matCount: countMap[e.student_id] || 0 }));
-    setRows(filtered);
+    // 학생별 면접 배정 (수업에 면접 종류가 없을 때 쓴다)
+    const { data: asg } = await supabase
+      .from("interview_assignments")
+      .select("student_id, category_key")
+      .in("student_id", studentIds);
+    const asgMap = {};
+    (asg ?? []).forEach((a) => { asgMap[a.student_id] = a.category_key; });
+
+    const typeOf = (e) =>
+      e.courses?.interview_category ||
+      LEGACY_COURSES[e.course_id] ||
+      asgMap[e.student_id] ||
+      "etc";
+
+    // 자료를 실제로 올린 학생만, 학생당 한 줄 (면접 종류가 정해진 수강을 우선)
+    const byStudent = {};
+    enrList.forEach((e) => {
+      if (!countMap[e.student_id]) return;
+      const row = { ...e, type: typeOf(e), matCount: countMap[e.student_id] };
+      const prev = byStudent[e.student_id];
+      if (!prev || (prev.type === "etc" && row.type !== "etc")) byStudent[e.student_id] = row;
+    });
+
+    setRows(
+      Object.values(byStudent).sort((a, b) =>
+        (a.profiles?.name ?? "").localeCompare(b.profiles?.name ?? "")
+      )
+    );
     setLoading(false);
   };
 
@@ -80,11 +106,19 @@ export default function StudentMaterialsView({ teacherId }) {
     setMatLoading(false);
   };
 
+  // 버튼은 면접 종류 목록 순서대로, 실제로 학생이 있는 종류만 보여준다
+  const present = new Set(rows.map((r) => r.type));
+  const typeFilters = [
+    { key: "all", label: "전체" },
+    ...CATEGORY_LIST.filter((c) => present.has(c.key)).map((c) => ({ key: c.key, label: c.label })),
+    ...(present.has("etc") ? [{ key: "etc", label: "기타" }] : []),
+  ];
+
   const visible = rows.filter((r) => {
-    if (typeFilter !== "all" && r.course_id !== typeFilter) return false;
+    if (typeFilter !== "all" && r.type !== typeFilter) return false;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      const hay = `${r.profiles?.name || ""} ${r.company || ""} ${r.job_role || ""} ${r.phone || ""}`.toLowerCase();
+      const hay = `${r.profiles?.name || ""} ${r.company || ""} ${r.exam_type || ""} ${r.job_role || ""} ${r.courses?.title || ""} ${r.phone || ""}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -95,11 +129,11 @@ export default function StudentMaterialsView({ teacherId }) {
   return (
     <div>
       <h2 className="mb-1 font-bold text-seum-navy">학생 자료 제출함</h2>
-      <p className="mb-4 text-sm text-slate-400">1:1 면접 수강생이 올린 이력서·자기소개서·면접 준비자료를 확인하고 다운로드합니다.</p>
+      <p className="mb-4 text-sm text-slate-400">담당 학생이 올린 이력서·자기소개서·생기부·면접 준비자료를 확인하고 다운로드합니다.</p>
 
       {/* 필터 + 검색 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        {TYPE_FILTERS.map((t) => (
+        {typeFilters.map((t) => (
           <button
             key={t.key}
             onClick={() => setTypeFilter(t.key)}
@@ -111,7 +145,7 @@ export default function StudentMaterialsView({ teacherId }) {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="이름·회사·직무 검색"
+          placeholder="이름·회사·학교·직무 검색"
           className="ml-auto w-full max-w-xs rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-seum-blue"
         />
       </div>
@@ -131,7 +165,7 @@ export default function StudentMaterialsView({ teacherId }) {
                 <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
                   <th className="px-4 py-3 font-medium">이름</th>
                   <th className="px-4 py-3 font-medium">면접유형</th>
-                  <th className="px-4 py-3 font-medium">지원회사</th>
+                  <th className="px-4 py-3 font-medium">지원</th>
                   <th className="px-4 py-3 font-medium">직무</th>
                   <th className="px-4 py-3 font-medium">구분</th>
                   <th className="px-4 py-3 font-medium">수강기간</th>
@@ -146,7 +180,7 @@ export default function StudentMaterialsView({ teacherId }) {
                     <td className="px-4 py-3 font-medium text-seum-navy">{r.profiles?.name ?? "이름없음"}</td>
                     <td className="px-4 py-3">
                       <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-seum-blue">
-                        {INTERVIEW_COURSES[r.course_id] ?? "면접"}
+                        {typeLabel(r.type)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-600">{r.company || r.exam_type || "-"}</td>
@@ -172,7 +206,7 @@ export default function StudentMaterialsView({ teacherId }) {
                   <div className="min-w-0">
                     <p className="font-bold text-seum-navy">{r.profiles?.name ?? "이름없음"}</p>
                     <span className="mt-1 inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-seum-blue">
-                      {INTERVIEW_COURSES[r.course_id] ?? "면접"}
+                      {typeLabel(r.type)}
                     </span>
                   </div>
                   <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">자료 {r.matCount}건</span>
@@ -210,7 +244,7 @@ export default function StudentMaterialsView({ teacherId }) {
               <div>
                 <h3 className="text-lg font-bold text-seum-navy">
                   {selected.profiles?.name}
-                  <span className="ml-2 text-sm font-normal text-slate-400">{INTERVIEW_COURSES[selected.course_id]}</span>
+                  <span className="ml-2 text-sm font-normal text-slate-400">{typeLabel(selected.type)}</span>
                 </h3>
                 <p className="mt-0.5 text-sm text-slate-500">
                   {selected.company || selected.exam_type || ""}
