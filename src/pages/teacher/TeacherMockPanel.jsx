@@ -197,6 +197,7 @@ export default function TeacherMockPanel({ teacherId, student = null, branchId =
   const [openId, setOpenId] = useState(null);
   const [live, setLive] = useState(false);
   const [reportFor, setReportFor] = useState(null);   // { id, name } — 성장 리포트
+  const [reportPick, setReportPick] = useState(false); // 성장 리포트 학생 고르기 창
 
   // 로그인한 사람과 역할
   useEffect(() => {
@@ -254,6 +255,22 @@ export default function TeacherMockPanel({ teacherId, student = null, branchId =
     const { data, error } = await q;
     if (error) console.error("모의면접 기록 조회 실패:", error);
     let list = data ?? [];
+
+    // [끝내고 닫기]를 누르지 않고 창을 닫은 기록은 "진행 중"으로 남는다.
+    // 시작한 지 3시간이 지난 것은 끝난 면접으로 보고 정리한다.
+    const STALE = 3 * 60 * 60 * 1000;
+    const stale = list.filter(
+      (x) => x.status !== "done" && Date.now() - new Date(x.opened_at ?? x.created_at).getTime() > STALE
+    );
+    if (stale.length) {
+      const { error: sErr } = await supabase
+        .from("univ_simulations")
+        .update({ status: "done", updated_at: new Date().toISOString() })
+        .in("id", stale.map((x) => x.id));
+      if (sErr) console.error("지난 기록 정리 실패:", sErr);
+      const ids = new Set(stale.map((x) => x.id));
+      list = list.map((x) => (ids.has(x.id) ? { ...x, status: "done" } : x));
+    }
     if (!student && isMaster && branchId) {
       const ids = new Set(students.map((s) => s.id));
       list = list.filter((x) => ids.has(x.student_id));
@@ -292,21 +309,53 @@ export default function TeacherMockPanel({ teacherId, student = null, branchId =
     loadSessions();
   };
 
-  // 같은 날 같은 조끼리 묶는다
+  // 한 번에 같이 진행한 면접끼리 묶는다
+  // 조 이름 기본값이 늘 "1조"라, 같은 날·같은 이름이어도 30분 넘게 떨어져 있으면 다른 묶음으로 본다.
   const groups = useMemo(() => {
+    const GAP = 30 * 60 * 1000;
     const out = [];
-    sessions.forEach((s) => {
-      const d = new Date(s.opened_at ?? s.created_at);
-      const key = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}|${s.live_group ?? ""}`;
-      let g = out.find((x) => x.key === key);
-      if (!g) {
-        g = { key, label: `${d.getMonth() + 1}월 ${d.getDate()}일${s.live_group ? ` ${s.live_group}` : ""}`, items: [] };
-        out.push(g);
+    const sorted = [...sessions].sort(
+      (a, b) => new Date(b.opened_at ?? b.created_at) - new Date(a.opened_at ?? a.created_at)
+    );
+    sorted.forEach((s) => {
+      const t = new Date(s.opened_at ?? s.created_at);
+      const day = `${t.getFullYear()}-${t.getMonth() + 1}-${t.getDate()}`;
+      const name = s.live_group ?? "";
+      const g = out.find((x) => x.day === day && x.name === name && Math.abs(x.last - t) <= GAP);
+      if (g) {
+        g.items.push(s);
+        g.last = t;
+        g.first = t;
+      } else {
+        out.push({ day, name, last: t, first: t, items: [s] });
       }
-      g.items.push(s);
     });
-    return out;
+    return out.map((g, i) => {
+      const hh = `${String(g.first.getHours()).padStart(2, "0")}:${String(g.first.getMinutes()).padStart(2, "0")}`;
+      return {
+        key: `${g.day}|${g.name}|${i}`,
+        label: `${g.first.getMonth() + 1}월 ${g.first.getDate()}일${g.name ? ` ${g.name}` : ""}`,
+        time: hh,
+        items: g.items,
+      };
+    });
   }, [sessions]);
+
+  // 성장 리포트를 볼 수 있는 학생 (모의면접 2회 이상)
+  const reportStudents = useMemo(() => {
+    const cnt = {};
+    sessions.forEach((x) => { cnt[x.student_id] = (cnt[x.student_id] || 0) + 1; });
+    return Object.entries(cnt)
+      .filter(([, n]) => n >= 2)
+      .map(([id, n]) => ({ id, n }))
+      .sort((a, b) => b.n - a.n);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions]);
+
+  const openReport = () => {
+    if (student) return setReportFor({ id: student.id, name: student.name });
+    setReportPick(true);
+  };
 
   if (!me.role) return <p className="text-slate-400">불러오는 중...</p>;
 
@@ -323,16 +372,14 @@ export default function TeacherMockPanel({ teacherId, student = null, branchId =
           </span>
         </div>
         <div className="flex gap-2">
-          {student && (
-            <button
-              type="button"
-              onClick={() => setReportFor({ id: student.id, name: student.name })}
-              disabled={sessions.length === 0}
-              className="rounded-lg border border-seum-blue px-4 py-2 text-sm font-bold text-seum-blue hover:bg-blue-50 disabled:opacity-40"
-            >
-              📈 성장 리포트
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={openReport}
+            disabled={sessionsLoading || sessions.length === 0}
+            className="rounded-lg border border-seum-blue px-4 py-2 text-sm font-bold text-seum-blue hover:bg-blue-50 disabled:opacity-40"
+          >
+            📈 성장 리포트
+          </button>
           <button
             type="button"
             onClick={() => setLive(true)}
@@ -363,7 +410,10 @@ export default function TeacherMockPanel({ teacherId, student = null, branchId =
         <div className="space-y-5">
           {groups.map((g) => (
             <div key={g.key}>
-              <p className="mb-2 text-xs font-bold text-slate-500">{g.label}</p>
+              <p className="mb-2 text-xs font-bold text-slate-500">
+                {g.label}
+                <span className="ml-1.5 font-medium text-slate-400">{g.time} 시작 · {g.items.length}명</span>
+              </p>
               <div className="space-y-2">
                 {g.items.map((sim) => {
                   const on = openId === sim.id;
@@ -386,10 +436,6 @@ export default function TeacherMockPanel({ teacherId, student = null, branchId =
                             {sim.status !== "done" && " · 진행 중"}
                           </p>
                         </button>
-                        <button type="button" onClick={() => setReportFor({ id: sim.student_id, name: nameOf(sim.student_id) })}
-                          className="shrink-0 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-bold text-slate-500 hover:border-seum-blue hover:text-seum-blue">
-                          📈 리포트
-                        </button>
                         <button type="button" onClick={() => removeSession(sim)}
                           className="shrink-0 text-xs text-slate-300 hover:text-red-500">✕</button>
                       </div>
@@ -400,6 +446,35 @@ export default function TeacherMockPanel({ teacherId, student = null, branchId =
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {reportPick && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setReportPick(false); }}>
+          <div className="w-full max-w-md bg-white p-6">
+            <div className="mb-1 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-seum-navy">📈 성장 리포트</h3>
+              <button type="button" onClick={() => setReportPick(false)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+            <p className="mb-4 text-xs text-slate-400">학생을 고르면 1회 · 2회 · 3회 … 회차별 변화를 보여드려요. 모의면접을 2번 이상 본 학생만 나옵니다.</p>
+            {reportStudents.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-slate-300 py-8 text-center text-sm text-slate-400">
+                아직 2번 이상 본 학생이 없어요.
+              </p>
+            ) : (
+              <div className="max-h-[60vh] space-y-1.5 overflow-y-auto">
+                {reportStudents.map((r) => (
+                  <button key={r.id} type="button"
+                    onClick={() => { setReportPick(false); setReportFor({ id: r.id, name: nameOf(r.id) }); }}
+                    className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-4 py-3 text-left hover:border-seum-blue hover:bg-blue-50">
+                    <span className="font-bold text-seum-navy">{nameOf(r.id)}</span>
+                    <span className="text-xs text-slate-500">모의면접 {r.n}회 →</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
