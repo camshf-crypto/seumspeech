@@ -726,6 +726,12 @@ export default function TeacherClassInterview({ courseType = "group" }) {
 
       setRows(merged);
       setDraftEdits(edits);
+      // 생기부 꼬리질문 — 한 번 만든 것은 저장돼 있다 (다시 열어도 AI를 또 부르지 않는다)
+      if (activeTab === PERSONAL_TAB) {
+        const drafts = {};
+        merged.forEach((r) => { if (r.follow_up_draft) drafts[r.id] = r.follow_up_draft; });
+        setFollowEdits(drafts);
+      }
     } catch (error) {
       console.error("면접 질문/답변 조회 실패:", error);
       setRows([]);
@@ -1015,6 +1021,9 @@ export default function TeacherClassInterview({ courseType = "group" }) {
     const a = qRow._answer;
     const answerText = (a?.teacher_answer ?? a?.student_answer ?? "").trim();
     if (!answerText) return alert("학생 답변이 없습니다.");
+    // 이미 만들어 둔 꼬리질문이 있으면 AI를 다시 부르기 전에 묻는다
+    if ((followEdits[qRow.id] ?? "").trim() &&
+        !window.confirm("이미 만든 꼬리질문이 있어요.\n새로 만들까요? (AI를 한 번 더 사용합니다)")) return;
 
     setFollowSaving(qRow.id + ":gen");
     try {
@@ -1039,11 +1048,23 @@ export default function TeacherClassInterview({ courseType = "group" }) {
       const q = pickFollowUp(data.feedback || "");
       if (!q) throw new Error("꼬리질문을 찾지 못했습니다. 다시 시도해주세요.");
       setFollowEdits((p) => ({ ...p, [qRow.id]: q }));
+      await saveFollowDraft(qRow.id, q);
     } catch (e) {
       alert("꼬리질문 생성 실패:\n\n" + e.message);
     } finally {
       setFollowSaving(null);
     }
+  };
+
+  // 꼬리질문 초안 저장 — 생성하거나 고친 꼬리질문을 질문 줄에 남겨 둔다
+  const saveFollowDraft = async (questionId, text) => {
+    const value = (text ?? "").trim() || null;
+    const { error } = await supabase
+      .from("student_questions")
+      .update({ follow_up_draft: value })
+      .eq("id", questionId);
+    if (error) { console.error("꼬리질문 저장 실패:", error); return; }
+    setRows((prev) => prev.map((r) => (r.id === questionId ? { ...r, follow_up_draft: value } : r)));
   };
 
   // 꼬리질문을 새 질문으로 만들어 학생에게 바로 보낸다
@@ -1065,6 +1086,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
     });
     setFollowSaving(null);
     if (error) return alert("꼬리질문 보내기 실패: " + error.message);
+    await saveFollowDraft(qRow.id, null);   // 보냈으니 초안은 비운다
 
     setFollowEdits((p) => {
       const next = { ...p };
@@ -1725,7 +1747,7 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                                     disabled={followSaving === qRow.id + ":gen"}
                                     className="rounded-md border border-emerald-600 px-2.5 py-0.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
                                   >
-                                    {followSaving === qRow.id + ":gen" ? "생성 중..." : "✨ 꼬리질문 생성"}
+                                    {followSaving === qRow.id + ":gen" ? "생성 중..." : (followEdits[qRow.id] ?? "").trim() ? "✨ 새로 생성" : "✨ 꼬리질문 생성"}
                                   </button>
                                 </div>
 
@@ -1735,6 +1757,10 @@ export default function TeacherClassInterview({ courseType = "group" }) {
                                     onChange={(e) =>
                                       setFollowEdits((p) => ({ ...p, [qRow.id]: e.target.value }))
                                     }
+                                    onBlur={(e) => {
+                                      if ((e.target.value ?? "").trim() !== (qRow.follow_up_draft ?? "").trim())
+                                        saveFollowDraft(qRow.id, e.target.value);
+                                    }}
                                     placeholder="생성 버튼을 누르면 채워집니다. 직접 써도 됩니다."
                                     className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
                                   />
