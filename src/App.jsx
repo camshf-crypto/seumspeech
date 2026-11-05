@@ -7,7 +7,7 @@ import FloatingQuick from "./components/FloatingQuick";
 import Footer from "./components/Footer";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Intro from "./pages/Intro";
-import Online from "./pages/online";
+import Online from "./pages/Online";
 import Home from "./pages/Home";
 import InterviewHome from "./pages/Interview/InterviewHome";
 import HighSchool from "./pages/Interview/HighSchool";
