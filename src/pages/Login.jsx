@@ -38,6 +38,13 @@ export default function Login() {
       return;
     }
 
+    // 수강신청 중에 로그인하러 왔으면 그 화면으로 돌려보낸다 (/login?next=/enroll?class=…)
+    const next = new URLSearchParams(window.location.search).get("next");
+    if (profile.role === "student" && next && next.startsWith("/") && !next.startsWith("//")) {
+      navigate(next);
+      return;
+    }
+
     // 3) 역할별 자동이동
     //    첫 로그인이라 비밀번호를 바꿔야 하는 경우는 ProtectedRoute 가 가로채 처리한다
     switch (profile.role) {

@@ -1,5 +1,69 @@
 import { useState, useEffect } from "react";
 import { BRANCHES, CLASS_LIST, DETAIL, LINKS } from "../config";
+import { useAuth } from "../contexts/AuthContext";
+
+// 수강신청 버튼 (오프라인 /enroll · 온라인 /online/enroll 같이 씀)
+//   학생으로 로그인됨 → 결제 페이지(/checkout)로 바로
+//   로그인 전 → 로그인 / 회원가입 안내 창 (로그인하면 결제 페이지로 돌아옴)
+// 온라인은 /online/checkout (온라인 화면 — 스피치 헤더·오른쪽 메뉴 없음), 오프라인은 /checkout
+export const checkoutUrl = (type, name) =>
+  type === "online"
+    ? `/online/checkout?${new URLSearchParams({ class: name })}`
+    : `/checkout?${new URLSearchParams({ type, class: name })}`;
+
+export function useApply(type) {
+  const { user, role } = useAuth();
+  const [modal, setModal] = useState(null);
+  const apply = (item) => {
+    if (user && role === "student") window.location.href = checkoutUrl(type, item.name);
+    else setModal(item);
+  };
+  const modalEl = modal && <ApplyModal item={modal} type={type} onClose={() => setModal(null)} />;
+  return { apply, modalEl };
+}
+
+export function ApplyModal({ item, type, onClose }) {
+  const { user, profile } = useAuth();
+  const branchName = BRANCHES.find((b) => b.id === item.branch)?.name ?? "";
+
+  // 회원가입하면 이 수업·지점이 미리 골라진 신청서로
+  const joinUrl = () => {
+    const n = item.name ?? "";
+    const detail = /면접/.test(n) ? "면접반" : /보이스/.test(n) ? "보이스" : "스피치";
+    return `/join?${new URLSearchParams({ branch: branchName, type: "group", detail, class: n })}`;
+  };
+  const loginUrl = () => `/login?${new URLSearchParams({ next: checkoutUrl(type, item.name) })}`;
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-seum-navy">수강신청</h3>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700">✕</button>
+        </div>
+        <p className="mb-1 font-bold text-slate-800">{item.name}</p>
+        {user ? (
+          <p className="mt-3 rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-600">
+            학생 계정으로 로그인해야 신청할 수 있어요. (지금 로그인: {profile?.name ?? "관리자"})
+          </p>
+        ) : (
+          <>
+            <p className="mb-4 mt-3 rounded-lg bg-amber-50 px-3 py-2.5 text-sm text-amber-700">
+              수강신청은 로그인 후 할 수 있어요.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => (window.location.href = loginUrl())}
+                className="rounded-lg bg-seum-blue py-3 text-sm font-bold text-white hover:bg-[#2a63c4]">로그인</button>
+              <button type="button" onClick={() => (window.location.href = joinUrl())}
+                className="rounded-lg border border-seum-blue py-3 text-sm font-bold text-seum-blue hover:bg-blue-50">회원가입</button>
+            </div>
+            <p className="mt-2 text-center text-[11px] text-slate-400">처음이시면 회원가입 후 바로 로그인할 수 있어요.</p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function StatusBadge({ status }) {
   const map = {
@@ -27,6 +91,7 @@ function Detail({ item, onBack }) {
   const [openFaq, setOpenFaq] = useState(null);
   const [openStep, setOpenStep] = useState(0);
   const [showBar, setShowBar] = useState(true);
+  const { apply: applyFor, modalEl } = useApply("offline");
 
   useEffect(() => {
     const onScroll = () => {
@@ -39,13 +104,8 @@ function Detail({ item, onBack }) {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const apply = () => {
-    if (LINKS.enroll && LINKS.enroll !== "#" && LINKS.enroll !== "/enroll") {
-      window.location.href = LINKS.enroll;
-    } else if (LINKS.kakao && LINKS.kakao !== "#") {
-      window.location.href = LINKS.kakao;
-    }
-  };
+  // 수강신청 → 로그인 여부에 따라 로그인·회원가입 안내 또는 신청·결제 창
+  const apply = () => applyFor(item);
   const closed = item.status === "마감";
 
   return (
@@ -223,13 +283,19 @@ function Detail({ item, onBack }) {
           </div>
         </div>
       </div>
+
+      {modalEl}
     </div>
   );
 }
 
 export default function EnrollPage() {
-  const [branch, setBranch] = useState(BRANCHES[0].id);
-  const [detail, setDetail] = useState(null);
+  // 로그인하고 돌아오면 (/enroll?class=수업명) 그 수업 화면을 바로 연다
+  const [detail, setDetail] = useState(() => {
+    const name = new URLSearchParams(window.location.search).get("class");
+    return name ? CLASS_LIST.find((c) => c.name === name) ?? null : null;
+  });
+  const [branch, setBranch] = useState(detail?.branch ?? BRANCHES[0].id);
 
   if (detail) return <Detail item={detail} onBack={() => setDetail(null)} />;
 

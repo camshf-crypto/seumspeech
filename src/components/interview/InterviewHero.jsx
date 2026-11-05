@@ -1,6 +1,9 @@
 import { useSiteImage } from "../../lib/useSiteImage";
 import { ITV_HERO } from "../../interviewConfig";
 
+// 첫 화면 아래 동그란 과정 칩 — 고입 · 대입 · 중고신입학교만 보여준다
+const HERO_CHIPS = ["고입면접", "대입면접", "중고신입학교"];
+
 export default function InterviewHero() {
   const heroBg = useSiteImage("interview_heroBg");
 
@@ -43,7 +46,7 @@ export default function InterviewHero() {
           </p>
 
           <div className="mt-8 hidden flex-wrap items-center justify-end gap-2.5 sm:flex">
-            {["입시면접", "공무원면접", "공기업면접", "경력직면접"].map((f) => (
+            {HERO_CHIPS.map((f) => (
               <span
                 key={f}
                 className="rounded-full border border-white/30 bg-white/10 px-4 py-2 text-sm font-semibold backdrop-blur-sm"

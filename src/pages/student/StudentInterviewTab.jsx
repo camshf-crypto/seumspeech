@@ -122,6 +122,133 @@ const PRINT_CSS = `
 .print-only { display: none; }
 `;
 
+// ───────────────────────────────────────────────
+// 🎙 말로 답하기 — 마이크로 말하면 답변 칸에 글로 들어간다 (CLOVA stt-clova)
+//   CSR 은 한 번에 60초까지만 받아서, 50초마다 잘라 차례대로 글로 바꿔 이어 붙인다.
+//   글이 들어가면 기존 자동 저장이 그대로 돈다.
+// ───────────────────────────────────────────────
+const STT_CHUNK_MS = 50000;
+
+async function sttClova(blob) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stt-clova`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${session?.access_token ?? import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/octet-stream",
+    },
+    body: blob,
+  });
+  const raw = await res.text();
+  let data = null;
+  try { data = JSON.parse(raw); } catch (_) { /* 아래에서 원문 사용 */ }
+  if (!res.ok || !data?.success) throw new Error(data?.error ?? `음성 인식 실패 (${res.status})`);
+  return (data.text ?? "").trim();
+}
+
+function MicAnswerButton({ disabled, onText }) {
+  const [state, setState] = useState("idle"); // idle | rec | busy
+  const [sec, setSec] = useState(0);
+  const streamRef = useRef(null);
+  const recRef = useRef(null);
+  const keepRef = useRef(false);
+  const queueRef = useRef(Promise.resolve());
+  const pendingRef = useRef(0);
+  const cutRef = useRef(null);
+  const tickRef = useRef(null);
+
+  const cleanup = () => {
+    window.clearTimeout(cutRef.current);
+    window.clearInterval(tickRef.current);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  };
+  useEffect(() => () => { keepRef.current = false; cleanup(); }, []);
+
+  // 녹음 한 토막 시작 (50초 뒤 자동으로 잘라서 다음 토막 시작)
+  const startChunk = () => {
+    const mime = ["audio/webm", "audio/mp4", "audio/ogg"].find(
+      (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported?.(t)
+    );
+    const rec = mime ? new MediaRecorder(streamRef.current, { mimeType: mime }) : new MediaRecorder(streamRef.current);
+    const chunks = [];
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = () => {
+      const blob = new Blob(chunks, { type: rec.mimeType || mime || "audio/webm" });
+      if (keepRef.current) startChunk();
+      if (blob.size < 2000) { if (!keepRef.current && pendingRef.current === 0) setState("idle"); return; }
+      pendingRef.current += 1;
+      // 토막 순서대로 글로 바꿔 붙인다
+      queueRef.current = queueRef.current.then(async () => {
+        try {
+          const text = await sttClova(blob);
+          if (text) onText(text);
+        } catch (e) {
+          alert("말로 답하기: " + e.message);
+        } finally {
+          pendingRef.current -= 1;
+          if (!keepRef.current && pendingRef.current === 0) setState("idle");
+        }
+      });
+    };
+    rec.start();
+    recRef.current = rec;
+    cutRef.current = window.setTimeout(() => { if (rec.state === "recording") rec.stop(); }, STT_CHUNK_MS);
+  };
+
+  const start = async () => {
+    try {
+      streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } catch (_) {
+      alert("마이크를 쓸 수 없어요. 주소창 왼쪽 자물쇠(아이폰은 aA) → 마이크 허용으로 바꿔 주세요.");
+      return;
+    }
+    keepRef.current = true;
+    setSec(0);
+    tickRef.current = window.setInterval(() => setSec((s) => s + 1), 1000);
+    setState("rec");
+    startChunk();
+  };
+
+  const stop = () => {
+    keepRef.current = false;
+    window.clearTimeout(cutRef.current);
+    window.clearInterval(tickRef.current);
+    setState("busy");
+    if (recRef.current?.state === "recording") recRef.current.stop();
+    window.setTimeout(() => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }, 300);
+  };
+
+  if (state === "rec") {
+    return (
+      <button type="button" onClick={stop}
+        className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700">
+        <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+        녹음 중 {String(Math.floor(sec / 60)).padStart(2, "0")}:{String(sec % 60).padStart(2, "0")} · 멈추기
+      </button>
+    );
+  }
+  if (state === "busy") {
+    return <span className="inline-flex items-center rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500">글로 바꾸는 중…</span>;
+  }
+  return (
+    <button type="button" onClick={start} disabled={disabled}
+      className="inline-flex items-center gap-1 rounded-lg border border-seum-blue px-3 py-1.5 text-xs font-bold text-seum-blue hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300">
+      🎙 말로 답하기
+    </button>
+  );
+}
+
+// 말로 한 내용을 기존 답변 뒤에 이어 붙인다
+const appendSpoken = (setAnswers, id) => (text) =>
+  setAnswers((p) => {
+    const cur = (p[id] ?? "").trimEnd();
+    return { ...p, [id]: cur ? `${cur} ${text}` : text };
+  });
+
 function parseGrades(text) {
   if (!text) return null;
   const lines = text.split("\n");
@@ -1056,6 +1183,11 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                 )}
               </p>
 
+              {!finished && !locked && (
+                <div className="no-print mb-2 flex justify-end">
+                  <MicAnswerButton disabled={locked || finished} onText={appendSpoken(setAnswers, q.id)} />
+                </div>
+              )}
               <textarea
                 data-guide={i === 0 ? "iv-answer" : undefined}
                 value={t}
@@ -1182,7 +1314,10 @@ export default function StudentInterviewTab({ studentId, locked = false }) {
                 return (
                   <div key={c.id} className="no-print mt-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
                     <p className="mb-1.5 text-[11px] font-black tracking-wide text-emerald-700">꼬리질문</p>
-                    <p className="mb-2 font-medium text-seum-navy">{c.question}</p>
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <p className="font-medium text-seum-navy">{c.question}</p>
+                      {!locked && <MicAnswerButton disabled={locked} onText={appendSpoken(setAnswers, c.id)} />}
+                    </div>
 
                     <textarea
                       value={ct}

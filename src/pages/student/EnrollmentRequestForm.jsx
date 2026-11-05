@@ -50,6 +50,22 @@ export default function EnrollmentRequestForm({ onSubmitted }) {
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(null); // 완료 후 로그인 정보 안내
 
+  // 수강신청 페이지에서 넘어오면 지점·수업이 주소에 붙어 온다
+  //   /join?branch=서울 마곡점&type=group&detail=스피치&class=힐링 스피치 (수_저녁)
+  const [preset] = useState(() => {
+    const q = new URLSearchParams(window.location.search);
+    return {
+      branch: q.get("branch") ?? "",
+      type: q.get("type") ?? "",
+      detail: q.get("detail") ?? "",
+      className: q.get("class") ?? "",
+    };
+  });
+  useEffect(() => {
+    if (preset.type === "group" || preset.type === "oneonone") setLessonType(preset.type);
+    if (preset.detail) setLessonDetail(preset.detail);
+  }, [preset]);
+
   const details = lessonType === "oneonone" ? ONE_DETAILS : GROUP_DETAILS;
 
   // 로그인 없이 쓰는 화면이므로 지점 목록을 직접 불러온다
@@ -64,8 +80,14 @@ export default function EnrollmentRequestForm({ onSubmitted }) {
         return;
       }
       setBranches(data ?? []);
+      // 넘어온 지점 이름으로 미리 선택 ("서울 마곡점" ↔ "마곡점"처럼 표기가 달라도 맞춘다)
+      if (preset.branch) {
+        const key = preset.branch.replace(/서울|인천|점|\s/g, "");
+        const hit = (data ?? []).find((b) => key && b.name.replace(/\s/g, "").includes(key));
+        if (hit) setBranchId(hit.id);
+      }
     })();
-  }, []);
+  }, [preset.branch]);
 
   const submit = async () => {
     if (!name.trim()) return alert("성명을 입력하세요.");
@@ -168,6 +190,13 @@ export default function EnrollmentRequestForm({ onSubmitted }) {
           아래 항목을 작성하시면 바로 이용하실 수 있습니다.
         </p>
       </div>
+
+      {preset.className && (
+        <div className="mb-4 border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-seum-navy">
+          <span className="font-bold">신청 수업</span> · {preset.className}
+          {preset.branch && <span className="text-slate-500"> ({preset.branch})</span>}
+        </div>
+      )}
 
       <div className="border border-slate-200 bg-white p-6 shadow-sm">
         {/* 성명 + 성별 */}

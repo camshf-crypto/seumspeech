@@ -40,14 +40,14 @@ export async function createOrder({ studentId, course, branchId }) {
 // ===== 결제 실행 =====
 // ★ 나중에 PG 붙일 때 이 함수 내부만 교체하면 됨.
 //    (포트원 SDK 호출 → 성공 콜백에서 아래 markPaid 호출)
-export async function runPayment(order) {
+export async function runPayment(order, method = "card") {
   // ---- 지금: 모의결제 (사용자 확인만 받고 성공 처리) ----
   const ok = window.confirm(
     `[모의결제]\n${order.course_title}\n금액: ${order.amount.toLocaleString()}원\n\n실제 결제는 아직 연동 전입니다. 결제 완료로 처리할까요?`
   );
   if (!ok) return { success: false, cancelled: true };
 
-  return await markPaid(order, { pay_method: "mock", pg_provider: "mock", pg_tx_id: "MOCK-" + order.order_no });
+  return await markPaid(order, { pay_method: method, pg_provider: "mock", pg_tx_id: "MOCK-" + order.order_no });
 
   // ---- 나중: 포트원 예시 (교체 시 참고) ----
   // const { IMP } = window;

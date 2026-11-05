@@ -7,6 +7,7 @@ import FloatingQuick from "./components/FloatingQuick";
 import Footer from "./components/Footer";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Intro from "./pages/Intro";
+import Online from "./pages/online";
 import Home from "./pages/Home";
 import InterviewHome from "./pages/Interview/InterviewHome";
 import HighSchool from "./pages/Interview/HighSchool";
@@ -24,6 +25,8 @@ import Career from "./pages/Interview/Career";
 import Executive from "./pages/Interview/Executive";
 import InterviewAbout from "./pages/Interview/InterviewAbout";
 import EnrollPage from "./components/EnrollPage";
+import OnlineEnroll from "./pages/OnlineEnroll";
+import Checkout from "./pages/Checkout";
 import About from "./pages/About";
 import Teachers from "./pages/Teachers";
 import LocationPage from "./pages/Location";
@@ -58,6 +61,22 @@ export default function App() {
       <div className="min-h-screen bg-white font-sans text-slate-900">
         <Routes>
           <Route path="/" element={<Intro />} />
+        </Routes>
+        <Footer />
+      </div>
+    );
+  }
+
+  // 온라인 스피치 클래스 — 자체 상단 바가 있어서 스피치 헤더·오른쪽 메뉴 없이
+  //   온라인 수강신청(/online/apply)과 온라인 결제(/online/checkout)도 여기
+  if (pathname === "/online" || pathname.startsWith("/online/")) {
+    return (
+      <div className="min-h-screen bg-white pb-20 font-sans text-slate-900 lg:pb-0">
+        <Routes>
+          <Route path="/online" element={<Online />} />
+          <Route path="/online/apply" element={<OnlineEnroll />} />
+          <Route path="/online/enroll" element={<OnlineEnroll />} />
+          <Route path="/online/checkout" element={<Checkout />} />
         </Routes>
         <Footer />
       </div>
@@ -167,6 +186,7 @@ export default function App() {
           <Route path="/interview/teachers" element={<Teachers />} />
           <Route path="/interview/location" element={<LocationPage />} />
           <Route path="/enroll" element={<EnrollPage />} />
+          <Route path="/checkout" element={<Checkout />} />
           <Route path="/about" element={<About />} />
           <Route path="/teachers" element={<Teachers />} />
           <Route path="/location" element={<LocationPage />} />

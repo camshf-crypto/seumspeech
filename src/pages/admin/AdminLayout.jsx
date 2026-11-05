@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { supabase } from "../../lib/supabase";
@@ -16,6 +16,8 @@ import AdminSettlementTab from "./AdminSettlementTab";
 import ContentTab from "./ContentTab";
 import TeacherProfileTab from "./TeacherProfileTab";
 import TeacherMockPanel from "../teacher/TeacherMockPanel";
+// 화상 수업(LiveKit)은 용량이 커서 메뉴를 열 때만 불러온다
+const OnlineClassRoom = lazy(() => import("../student/OnlineClassRoom"));
 import PushNotificationButton from "./PushNotificationButton";
 
 // 학생 자료함은 수강생 관리 목록의 [자료함] 버튼으로 옮겼고,
@@ -28,6 +30,7 @@ const MENUS = [
   { key: "students", label: "수강생(수업) 관리" },
   { key: "assign", label: "학생 배정" },
   { key: "mock", label: "모의면접" },
+  { key: "online", label: "온라인 수업" },
   { key: "teachers", label: "선생님 관리" },
   { key: "consult", label: "상담 관리" },
   { key: "consultManual", label: "상담 매뉴얼" },
@@ -106,6 +109,8 @@ export default function AdminLayout() {
         return <AssignTab />;
       case "mock":
         return <TeacherMockPanel teacherId={profile?.id} branchId={branchId} />;
+      case "online":
+        return <Suspense fallback={<p className="py-10 text-center text-sm text-slate-400">불러오는 중…</p>}><OnlineClassRoom userId={profile?.id} staff /></Suspense>;
       case "teachers":
         return <TeachersTab branchId={branchId} />;
       case "consult":

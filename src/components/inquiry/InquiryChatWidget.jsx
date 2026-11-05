@@ -3,14 +3,12 @@ import { supabase } from "../../lib/supabase";
 
 const STORAGE_KEY = "seum_inquiry_id";
 
+// 상담 분야 — 고입 · 대입 · 중고신입학교 중심으로 정리 (공무원·공기업·사기업·병원·편입은 뺌)
+// 예전 상담 기록의 분야 값은 그대로 남아 있어 관리자 화면에서 계속 보인다.
 const CATEGORIES = [
-  { key: "사기업면접", label: "사기업 면접" },
-  { key: "공무원면접", label: "공무원 면접" },
-  { key: "공기업면접", label: "공기업 면접" },
-  { key: "병원면접", label: "병원 면접" },
   { key: "고입면접", label: "고입 면접" },
   { key: "대입면접", label: "대입 면접" },
-  { key: "편입면접", label: "편입 면접" },
+  { key: "중고신입학교", label: "중고신입학교" },
   { key: "스피치", label: "스피치" },
   { key: "발표불안", label: "발표불안" },
   { key: "보이스", label: "보이스" },

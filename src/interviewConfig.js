@@ -2,33 +2,32 @@
 //  세움면접(Interview) 전용 데이터
 //  스피치 config.js 와 같은 구조, 내용만 면접용
 //  이미지는 site_images 테이블에서 'interview_' 접두사로 불러옴
+//
+//  2026-10 개편: 고입 · 대입 · 중고신입학교 3개 과정만 앞에 내세운다.
+//  공무원·공기업·경력직 페이지 데이터(ITV_PUBLIC 등)는 지우지 않고 아래에 그대로 둔다.
+//  메뉴에서만 빠져 있어서, 나중에 다시 쓰려면 ITV_NAV 에 한 줄만 되살리면 된다.
 // ════════════════════════════════════════════════
 
-// 면접 분야 4개
+// 면접 분야 3개
+// key 는 다른 화면이 찾아 쓰는 이름이라 대입은 예전 값 "exam" 을 그대로 쓴다.
 export const ITV_FIELDS = [
   {
+    key: "high",
+    label: "고입",
+    desc: "자소서가 합격을 가른다, 학교별 평가요소 맞춤 대비",
+    tag: "자사고·국제고·외고·과학고",
+  },
+  {
     key: "exam",
-    label: "입시면접",
+    label: "대입",
     desc: "생기부 기반 완벽 대비, 최강 합격률",
-    tag: "대입·편입·고입·대학원",
+    tag: "학생부종합·제시문·편입·대학원",
   },
   {
-    key: "public",
-    label: "공무원면접",
-    desc: "급변하는 공무원 면접, 직렬별 맞춤 대비",
-    tag: "국가직·지방직·서울시",
-  },
-  {
-    key: "company",
-    label: "공기업면접",
-    desc: "NCS 기반 직무역량 중심, 토론·PT 완벽 대비",
-    tag: "NCS·토론·PT",
-  },
-  {
-    key: "career",
-    label: "경력직면접",
-    desc: "실무 경험을 강점으로, 인사 실무자 코칭",
-    tag: "이직·전문직·임원",
+    key: "freshman",
+    label: "중고신입학교",
+    desc: "[중고신입학교 한 줄 소개]",
+    tag: "[대상 · 과정 키워드]",
   },
 ];
 
@@ -37,12 +36,19 @@ export const ITV_HERO = {
   badge: "면접 합격률 1위",
   slogan1: "최종 합격 결과로 증명합니다!!",
   slogan2: "역전시키는 합격의 비결",
-  desc: "준비 방법이 다르면 합격할 수 있습니다. 세움면접에서 최종 합격을 완성하세요.",
+  desc: "고입·대입 면접부터 중고신입학교까지. 준비 방법이 다르면 합격할 수 있습니다. 세움면접에서 최종 합격을 완성하세요.",
 };
 
 // 면접 과정 (그룹반 + 1:1 구조)
 //  type: "group"(단체반) | "oneonone"(1:1)
 export const ITV_COURSES = [
+  {
+    field: "high",
+    title: "고입 면접",
+    type: "oneonone",
+    desc: "자사고·국제고·특목고 — 학교별 평가요소를 반영한 자소서와 면접을 1:1로 완성합니다.",
+    badge: "인기",
+  },
   {
     field: "exam",
     title: "대입 면접",
@@ -51,35 +57,21 @@ export const ITV_COURSES = [
     badge: "인기",
   },
   {
-    field: "public",
-    title: "공무원 면접 그룹반",
-    type: "group",
-    desc: "토론·집단면접은 함께 연습해야 실전감이 삽니다. 직렬별 소수정예 그룹반.",
-    badge: "신규",
-  },
-  {
-    field: "company",
-    title: "공기업 면접 그룹반",
-    type: "group",
-    desc: "NCS·토론·PT를 그룹으로 실전처럼. 합리적인 비용으로 시작하세요.",
-    badge: "신규",
-  },
-  {
-    field: "public",
-    title: "공무원·공기업 1:1 집중반",
-    type: "oneonone",
-    desc: "그룹반 후 더 디테일한 개별 코칭이 필요한 분을 위한 프리미엄 과정.",
-    badge: "",
-  },
-  {
-    field: "career",
-    title: "경력직·이직 면접",
-    type: "oneonone",
-    desc: "인사 실무자 출신 코치가 실무 경험을 강점으로 바꿔드립니다.",
-    badge: "",
-  },
-  {
     field: "exam",
+    title: "대입 면접 1:1 집중반",
+    type: "oneonone",
+    desc: "학생마다 합격 컨셉을 잡고 생기부·기출·제시문까지 100% 맞춤으로 설계합니다.",
+    badge: "",
+  },
+  {
+    field: "freshman",
+    title: "중고신입학교",
+    type: "group",
+    desc: "[중고신입학교 과정 소개 한두 문장]",
+    badge: "신규",
+  },
+  {
+    field: "high",
     title: "자소서 컨설팅",
     type: "oneonone",
     desc: "서류부터 면접까지, 합격하는 자기소개서를 함께 완성합니다.",
@@ -87,26 +79,23 @@ export const ITV_COURSES = [
   },
 ];
 
-// 면접 합격후기 (메인 슬라이드용)
+// 면접 합격후기 (메인 슬라이드용) — 입시 합격생만 남김. 고입 합격 후기를 더 넣어 주세요.
 export const ITV_REVIEWS = [
-  { name: "손*진 합격생", result: "해군 군무원 최종합격", field: "공무원 면접" },
-  { name: "강*훈 합격생", result: "인천대·인하대·건국대 합격", field: "입시면접" },
-  { name: "박*진 합격생", result: "한국교통안전공단 최종합격", field: "공기업 면접" },
-  { name: "이*동 합격생", result: "삼성생명 최종합격", field: "경력직 면접" },
-  { name: "곽*신 합격생", result: "서울시 9급 기계직 최종합격", field: "공무원 면접" },
-  { name: "박*빈 합격생", result: "연세대학교 석사 최종합격", field: "입시면접" },
+  { name: "강*훈 합격생", result: "인천대·인하대·건국대 합격", field: "대입 면접" },
+  { name: "박*빈 합격생", result: "연세대학교 석사 최종합격", field: "대학원 면접" },
 ];
 
 // 면접 갤러리 캡션
 export const ITV_GALLERY = [
   { caption: "실전 모의면접 현장" },
   { caption: "1:1 집중 코칭" },
-  { caption: "토론·집단면접 그룹반" },
+  { caption: "소수정예 그룹반" },
   { caption: "면접 영상 피드백" },
 ];
 
 // ════════════════════════════════════════════════
 //  면접 사이트 전용 메뉴 (스피치와 다름)
+//  아카데미 소개 · 고입 · 대입 · 중고신입학교 · 합격소식 · 커뮤니티
 // ════════════════════════════════════════════════
 export const ITV_NAV = [
   {
@@ -119,42 +108,26 @@ export const ITV_NAV = [
     ],
   },
   {
-    label: "입시면접",
-    href: "/interview/exam",
+    label: "고입",
+    href: "/interview/high",
     sub: [
       { label: "고입 면접", href: "/interview/high" },
+    ],
+  },
+  {
+    label: "대입",
+    href: "/interview/exam",
+    sub: [
       { label: "대입 면접", href: "/interview/exam" },
       { label: "편입 면접", href: "/interview/transfer" },
       { label: "대학원 면접", href: "/interview/grad" },
     ],
   },
   {
-    label: "공무원면접",
-    href: "/interview/public",
-    sub: [
-      { label: "국가직 공무원", href: "/interview/public" },
-      { label: "지방직 공무원", href: "/interview/public-local" },
-      { label: "서울시 공무원", href: "/interview/public-seoul" },
-      { label: "군무원", href: "/interview/public-military" },
-      { label: "소방·경찰", href: "/interview/public" },
-    ],
-  },
-  {
-    label: "공기업면접",
-    href: "/interview/company",
-    sub: [
-      { label: "공기업 면접", href: "/interview/company" },
-      { label: "NCS·직무역량", href: "/interview/company-ncs" },
-      { label: "토론·PT 면접", href: "/interview/company-debate" },
-    ],
-  },
-  {
-    label: "경력직면접",
-    href: "/interview/career",
-    sub: [
-      { label: "경력직 면접", href: "/interview/career" },
-      { label: "임원 면접", href: "/interview/executive" },
-    ],
+    label: "중고신입학교",
+    // 전용 페이지를 만들기 전까지는 상담 신청으로 보낸다. 페이지가 생기면 "/interview/freshman" 으로 바꾼다.
+    href: "/consult",
+    sub: [],
   },
   {
     label: "합격소식",
@@ -273,7 +246,7 @@ export const ITV_ABOUT = {
   greeting: [
     "안녕하세요. 세움면접 원장 김지윤입니다.",
     "그동안 면접 교육을 하며 수없이 많은 분들이 합격의 순간을 맞이하는 모습을 보았습니다.",
-    "세움면접은 '준비한 사람이 합격한다'는 모토로, 입시·공무원·공기업·경력직 면접의 합격 전략을 연구하고 교육하고 있습니다.",
+    "세움면접은 '준비한 사람이 합격한다'는 모토로, 고입·대입 면접과 중고신입학교의 합격 전략을 연구하고 교육하고 있습니다.",
     "중요한 면접을 앞둔 여러분의 자리를 높일 수 있도록, 학교·기관별 데이터와 평가요소를 모두 반영한 맞춤 컨설팅과 AI 면접 시뮬레이션으로 합격까지 함께하겠습니다.",
     "확실한 변화의 시작! 세움면접과 함께 하세요. 당신도 합격할 수 있습니다.",
   ],

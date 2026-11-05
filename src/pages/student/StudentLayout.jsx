@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { supabase } from "../../lib/supabase";
@@ -11,6 +11,8 @@ import StudentInterviewTab from "./StudentInterviewTab";
 import MockBooking from "./MockBooking";
 import AbsenceRequestTab from "./AbsenceRequestTab";
 import AiWorkHome from "./AiWorkHome";
+// 화상 수업(LiveKit)은 용량이 커서 메뉴를 열 때만 불러온다
+const OnlineClassRoom = lazy(() => import("./OnlineClassRoom"));
 import GuideTour from "../../components/GuideTour";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -24,6 +26,7 @@ const AIWORK_CATEGORIES = ["public_corp", "company"];
 // 주소 검사는 이 목록으로 한다. (불러오는 중에 엉뚱한 탭으로 튀지 않게)
 const ALL_KEYS = [
   "courses",
+  "online",
   "absence",
   "materials",
   "homework",
@@ -158,12 +161,15 @@ export default function StudentLayout() {
 
   // 모의면접 신청은 대입 면접 학생만
   const hasUniv = myCategories.has("univ");
+  // 온라인 수업 (화상) 수강 중이면 메뉴 보이기
+  const hasOnline = enrollments.some((e) => e.courses?.course_kind === "online");
 
   const hasActive = enrollments.some((e) => !isExpired(e));
   const locked = enrollments.length > 0 && !hasActive;
 
   const MENUS = [
     { key: "courses", label: "수강 현황" },
+    ...(hasOnline ? [{ key: "online", label: "온라인 수업" }] : []),
     { key: "absence", label: "결석 신청" },
     { key: "materials", label: "자료 제출함" },
     { key: "homework", label: "숙제" },
@@ -264,6 +270,7 @@ export default function StudentLayout() {
           </p>
         ) : null
       )}
+      {active === "online" && <Suspense fallback={<p className="py-10 text-center text-sm text-slate-400">불러오는 중…</p>}><OnlineClassRoom userId={profile.id} /></Suspense>}
       {active === "aiwork" && (
         hasAiWork ? (
           <AiWorkHome />
