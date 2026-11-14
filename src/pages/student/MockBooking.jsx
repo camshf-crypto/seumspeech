@@ -21,7 +21,15 @@ export const MOCK_SCHEDULE = {
   cap: 5,
   lockDays: 3,                // 면접 며칠 전부터 취소·변경을 막을지
   weeksAhead: 4,              // 오늘부터 몇 주치를 보여줄지
+  // 정해진 요일 말고 따로 여는 날 — { "YYYY-MM-DD": ["시간", ...] }
+  //   (SQL mock_check() 에도 같은 날짜를 넣어야 예약이 저장된다)
+  extra: {
+    "2026-11-20": ["18:30"],   // 금
+  },
 };
+
+// 그 날짜에 열린 시간 — 따로 연 날이면 그 시간만
+const timesOf = (date) => MOCK_SCHEDULE.extra?.[date] ?? MOCK_SCHEDULE.times;
 
 const DOW = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -50,9 +58,13 @@ function slotDates() {
 
   const out = [];
   for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
-    if (weekdays.includes(d.getDay())) out.push(ymd(d));
+    if (weekdays.includes(d.getDay()) || MOCK_SCHEDULE.extra?.[ymd(d)]) out.push(ymd(d));
   }
-  return out;
+  // 범위 밖이라도 내일 이후의 따로 연 날은 넣는다
+  Object.keys(MOCK_SCHEDULE.extra ?? {}).forEach((x) => {
+    if (parse(x) >= tomorrow && !out.includes(x)) out.push(x);
+  });
+  return out.sort();
 }
 
 export default function MockBooking({ studentId, onClose, asPage: asPageProp = false }) {
@@ -273,7 +285,7 @@ export default function MockBooking({ studentId, onClose, asPage: asPageProp = f
                       <div key={d} className="flex items-center gap-2 border border-slate-200 px-3 py-2">
                         <span className="w-28 shrink-0 text-sm font-bold text-seum-navy">{label(d)}</span>
                         <div className="flex flex-1 gap-1.5">
-                          {MOCK_SCHEDULE.times.map((t) => {
+                          {timesOf(d).map((t) => {
                             const n = left(d, t);
                             const full = n <= 0;
                             const on = slot?.date === d && slot?.time === t;
