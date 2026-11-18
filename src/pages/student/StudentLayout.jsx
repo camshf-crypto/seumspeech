@@ -9,6 +9,7 @@ import ChatTab from "./ChatTab";
 import NotificationsTab from "./NotificationsTab";
 import StudentInterviewTab from "./StudentInterviewTab";
 import MockBooking from "./MockBooking";
+import InterviewReview from "./InterviewReview";
 import AbsenceRequestTab from "./AbsenceRequestTab";
 import AiWorkHome from "./AiWorkHome";
 // 화상 수업(LiveKit)은 용량이 커서 메뉴를 열 때만 불러온다
@@ -32,6 +33,7 @@ const ALL_KEYS = [
   "homework",
   "interview",
   "mock_booking",
+  "review",
   "aiwork",
   "chat",
   "payments",
@@ -175,6 +177,7 @@ export default function StudentLayout() {
     { key: "homework", label: "숙제" },
     ...(hasInterview ? [{ key: "interview", label: "나의 면접 수업" }] : []),
     ...(hasUniv ? [{ key: "mock_booking", label: "모의면접 신청" }] : []),
+    ...(hasInterview ? [{ key: "review", label: "면접 후기" }] : []),
     ...(hasAiWork ? [{ key: "aiwork", label: "AI 직무역량" }] : []),
     { key: "chat", label: "선생님과 채팅" },
     { key: "payments", label: "결제내역" },
@@ -261,6 +264,7 @@ export default function StudentLayout() {
       {active === "materials" && <MaterialsTab studentId={profile.id} locked={locked} />}
       {active === "homework" && <HomeworkTab studentId={profile.id} locked={locked} />}
       {active === "interview" && <StudentInterviewTab studentId={profile.id} locked={locked} />}
+      {active === "review" && <InterviewReview studentId={profile.id} />}
       {active === "mock_booking" && (
         hasUniv ? (
           <MockBooking studentId={profile.id} asPage />
@@ -395,7 +399,7 @@ export default function StudentLayout() {
       {seenGuides && profile?.id && (
         <GuideTour
           userId={profile.id}
-          guideKey={(active === "aiwork" && !hasAiWork) || active === "mock_booking" ? null : active}
+          guideKey={(active === "aiwork" && !hasAiWork) || active === "mock_booking" || active === "review" ? null : active}
           seen={seenGuides}
           onDone={(next) => setSeenGuides(next)}
         />

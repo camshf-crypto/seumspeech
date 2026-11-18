@@ -16,6 +16,7 @@ import AdminSettlementTab from "./AdminSettlementTab";
 import ContentTab from "./ContentTab";
 import TeacherProfileTab from "./TeacherProfileTab";
 import TeacherMockPanel from "../teacher/TeacherMockPanel";
+import ReviewsPanel from "../teacher/ReviewsPanel";
 // 화상 수업(LiveKit)은 용량이 커서 메뉴를 열 때만 불러온다
 const OnlineClassRoom = lazy(() => import("../student/OnlineClassRoom"));
 import PushNotificationButton from "./PushNotificationButton";
@@ -30,6 +31,7 @@ const MENUS = [
   { key: "students", label: "수강생(수업) 관리" },
   { key: "assign", label: "학생 배정" },
   { key: "mock", label: "모의면접" },
+  { key: "reviews", label: "면접 후기" },
   { key: "online", label: "온라인 수업" },
   { key: "teachers", label: "선생님 관리" },
   { key: "consult", label: "상담 관리" },
@@ -109,6 +111,8 @@ export default function AdminLayout() {
         return <AssignTab />;
       case "mock":
         return <TeacherMockPanel teacherId={profile?.id} branchId={branchId} />;
+      case "reviews":
+        return <ReviewsPanel teacherId={profile?.id} all />;
       case "online":
         return <Suspense fallback={<p className="py-10 text-center text-sm text-slate-400">불러오는 중…</p>}><OnlineClassRoom userId={profile?.id} staff /></Suspense>;
       case "teachers":
