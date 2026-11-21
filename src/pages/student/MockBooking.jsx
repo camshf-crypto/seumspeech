@@ -2,7 +2,7 @@
 // 학생 — 모의면접 신청
 //
 // 정해진 시간표에서 빈자리를 골라 바로 예약한다. 학생당 1회.
-//   2026-10-21부터 매주 수·목, 18:30 / 20:00, 타임당 5명
+//   2026-10-21부터 12-10까지 매주 수·목, 18:30 / 20:00, 타임당 5명
 //   (바꿀 때는 아래 MOCK_SCHEDULE 과 SQL 의 mock_check() 숫자를 같이 고친다)
 // 예약할 때 이번에 면접 보는 학교·학과(필수)·전형(선택)을 받는다.
 // 면접 3일 전부터는 취소·변경할 수 없다 (21일 면접이면 17일까지만). SQL 정책과 숫자를 같이 맞춘다.
@@ -16,6 +16,7 @@ import { supabase } from "../../lib/supabase";
 
 export const MOCK_SCHEDULE = {
   start: "2026-10-21",
+  end: "2026-12-10",          // 이 날까지만 연다 (목). 바꿀 때는 SQL mock_check() 의 마지막 날도 같이
   weekdays: [3, 4],           // 0=일 … 3=수, 4=목
   times: ["18:30", "20:00"],
   cap: 5,
@@ -55,6 +56,8 @@ function slotDates() {
   const from = parse(start) > tomorrow ? parse(start) : tomorrow;
   const to = new Date(from);
   to.setDate(from.getDate() + weeksAhead * 7);
+  // 마지막 날이 정해져 있으면 그 날까지만
+  if (MOCK_SCHEDULE.end && parse(MOCK_SCHEDULE.end) < to) to.setTime(parse(MOCK_SCHEDULE.end).getTime());
 
   const out = [];
   for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
@@ -62,7 +65,7 @@ function slotDates() {
   }
   // 범위 밖이라도 내일 이후의 따로 연 날은 넣는다
   Object.keys(MOCK_SCHEDULE.extra ?? {}).forEach((x) => {
-    if (parse(x) >= tomorrow && !out.includes(x)) out.push(x);
+    if (parse(x) >= tomorrow && parse(x) <= to && !out.includes(x)) out.push(x);
   });
   return out.sort();
 }
